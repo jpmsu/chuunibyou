@@ -26,7 +26,7 @@ jobs:
         run: |
           git remote add upstream https://github.com/KJGX66F/usque-custom-pro.git || true
           git fetch upstream main
-          # 核心修复：强制将 pages 目录重置为官方最新纯净版，清除所有历史注入残留
+          # 强制将 pages 目录重置为官方最新纯净版，清除历史残留
           git checkout upstream/main -- pages/
           git checkout HEAD -- README.md 2>/dev/null || true
 
@@ -35,7 +35,7 @@ jobs:
           # 1. 移除 _routes.json，接管全站流量
           git rm -f pages/_routes.json 2>/dev/null || rm -f pages/_routes.json
 
-          # 2. 写入干净的单次注入脚本
+          # 2. 写入干净的注入脚本（使用 __auth_url 避免同名变量冲突）
           cat << 'EOF' > patch_worker.js
           const fs = require("fs");
           const file = "pages/_worker.js";
@@ -254,16 +254,16 @@ jobs:
           </html>\`;
           `;
 
+          // 使用 __auth_url 彻底避免与上游原本的 const url 冲突
           const fetchInterceptor = `
-          const url = new URL(request.url);
-
           // 1. Session Gateway Authentication
           if (env.AUTH_PASS) {
+            const __auth_url = new URL(request.url);
             const expectedToken = await getAuthToken(env.AUTH_PASS);
             const userToken = getSessionCookie(request);
 
             // 登录校验端点
-            if (url.pathname === "/api/sys/auth" && request.method === "POST") {
+            if (__auth_url.pathname === "/api/sys/auth" && request.method === "POST") {
               try {
                 const body = await request.json();
                 const expectedUser = env.AUTH_USER || "admin";
@@ -290,7 +290,7 @@ jobs:
 
             // 未登录拦截
             if (userToken !== expectedToken) {
-              if (url.pathname.startsWith("/api/")) {
+              if (__auth_url.pathname.startsWith("/api/")) {
                 return json({ message: "Authentication required", code: 401 }, 401);
               }
               return new Response(LOGIN_PAGE_HTML, {

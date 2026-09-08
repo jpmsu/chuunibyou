@@ -31,11 +31,11 @@ jobs:
 
       - name: Apply Disguised Admin Portal Guard
         run: |
-          # 1. 移除 _routes.json，接管全站流量（扫域名也必定先看到控制台登录页）
+          # 1. 移除 _routes.json，接管全站流量
           git rm -f pages/_routes.json 2>/dev/null || rm -f pages/_routes.json
 
-          # 2. 注入伪装的控制台登录页面及会话鉴权逻辑
-          node -e '
+          # 2. 使用绝对零转义的纯文本生成补丁
+          cat << 'EOF' > patch_worker.js
           const fs = require("fs");
           const file = "pages/_worker.js";
           let code = fs.readFileSync(file, "utf8");
@@ -54,7 +54,7 @@ jobs:
             return match ? match[1] : null;
           }
 
-          const LOGIN_PAGE_HTML = \\\`<!DOCTYPE html>
+          const LOGIN_PAGE_HTML = \`<!DOCTYPE html>
           <html lang="zh-CN">
           <head>
             <meta charset="UTF-8">
@@ -250,7 +250,7 @@ jobs:
               });
             </script>
           </body>
-          </html>\\\`;
+          </html>\`;
           `;
 
           const fetchInterceptor = `
@@ -271,7 +271,7 @@ jobs:
                     status: 200,
                     headers: {
                       "Content-Type": "application/json; charset=utf-8",
-                      "Set-Cookie": \\\`sys_auth_token=\\\${expectedToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000\\\`
+                      "Set-Cookie": "sys_auth_token=" + expectedToken + "; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000"
                     }
                   });
                 }
@@ -287,7 +287,7 @@ jobs:
               }
             }
 
-            // 未登录态拦截
+            // 未登录拦截
             if (userToken !== expectedToken) {
               if (url.pathname.startsWith("/api/")) {
                 return json({ message: "Authentication required", code: 401 }, 401);
@@ -311,8 +311,13 @@ jobs:
           );
 
           fs.writeFileSync(file, transformed, "utf8");
-          console.log("Disguised Admin Portal Guard applied successfully.");
-          '
+          EOF
+
+          # 执行脚本并校验语法
+          node patch_worker.js
+          rm -f patch_worker.js
+          node -c pages/_worker.js
+          echo "Pages worker syntax verified successfully."
 
       - name: Commit and Push Changes
         run: |

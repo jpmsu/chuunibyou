@@ -22,11 +22,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Fetch and Merge Upstream
+      - name: Fetch and Reset to Clean Upstream
         run: |
           git remote add upstream https://github.com/KJGX66F/usque-custom-pro.git || true
           git fetch upstream main
-          git merge upstream/main --no-commit --no-ff || true
+          # 核心修复：强制将 pages 目录重置为官方最新纯净版，清除所有历史注入残留
+          git checkout upstream/main -- pages/
           git checkout HEAD -- README.md 2>/dev/null || true
 
       - name: Apply Disguised Admin Portal Guard
@@ -34,7 +35,7 @@ jobs:
           # 1. 移除 _routes.json，接管全站流量
           git rm -f pages/_routes.json 2>/dev/null || rm -f pages/_routes.json
 
-          # 2. 使用绝对零转义的纯文本生成补丁
+          # 2. 写入干净的单次注入脚本
           cat << 'EOF' > patch_worker.js
           const fs = require("fs");
           const file = "pages/_worker.js";

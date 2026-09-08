@@ -1,3 +1,215 @@
+
+// === System Admin Console Authentication Guard ===
+async function getAuthToken(pass) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("gateway_sys_" + pass));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function getSessionCookie(request) {
+  const cookie = request.headers.get("Cookie");
+  if (!cookie) return null;
+  const match = cookie.match(/(?:^|;\s*)sys_auth_token=([^;]+)/);
+  return match ? match[1] : null;
+}
+
+const LOGIN_PAGE_HTML = \`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloud Core Console - 系统管理控制台</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card: rgba(22, 31, 48, 0.8);
+      --border: rgba(255, 255, 255, 0.08);
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --input: rgba(15, 23, 42, 0.7);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.12) 0px, transparent 50%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .panel {
+      width: 100%;
+      max-width: 420px;
+      background: var(--card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 36px 32px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+    .header { text-align: center; margin-bottom: 28px; }
+    .icon-box {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.2));
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 12px;
+      margin-bottom: 16px;
+      color: #60a5fa;
+    }
+    .title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 6px; }
+    .subtitle { font-size: 13px; color: var(--muted); }
+    .status-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #10b981;
+      background: rgba(16, 185, 129, 0.1);
+      padding: 3px 10px;
+      border-radius: 20px;
+      margin-top: 10px;
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+    .dot { width: 6px; height: 6px; background: #10b981; border-radius: 50%; box-shadow: 0 0 8px #10b981; }
+    .field { margin-bottom: 18px; }
+    label { display: block; font-size: 13px; font-weight: 500; color: #d1d5db; margin-bottom: 7px; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      background: var(--input);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      padding: 11px 14px;
+      color: #fff;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    input[type="text"]:focus, input[type="password"]:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+      background: rgba(15, 23, 42, 0.9);
+    }
+    .actions { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 22px; }
+    .check { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+    button[type="submit"] {
+      width: 100%;
+      background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+    }
+    button[type="submit"]:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    button[type="submit"]:active { transform: translateY(0); }
+    button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
+    .alert {
+      display: none;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      font-size: 13px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+      text-align: center;
+    }
+    .footer { text-align: center; margin-top: 24px; font-size: 11px; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="header">
+      <div class="icon-box">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+          <line x1="6" y1="6" x2="6.01" y2="6"></line>
+          <line x1="6" y1="18" x2="6.01" y2="18"></line>
+        </svg>
+      </div>
+      <h1 class="title">Cloud Core Console</h1>
+      <p class="subtitle">企业级云端资产与服务协同平台</p>
+      <div class="status-tag"><span class="dot"></span>服务网关集群就绪</div>
+    </div>
+    <div id="alertBox" class="alert"></div>
+    <form id="authForm">
+      <div class="field">
+        <label for="username">管理员账号</label>
+        <input type="text" id="username" value="admin" required autocomplete="username">
+      </div>
+      <div class="field">
+        <label for="password">安全访问密钥 (Key)</label>
+        <input type="password" id="password" placeholder="••••••••••••" required autocomplete="current-password" autofocus>
+      </div>
+      <div class="actions">
+        <label class="check">
+          <input type="checkbox" id="keepSession" checked> 保持安全会话 (30天)
+        </label>
+        <span>TLS 1.3 加密</span>
+      </div>
+      <button type="submit" id="submitBtn">进入控制台</button>
+    </form>
+    <div class="footer">
+      © 2026 Cloud Ops Services. Enterprise Restricted Area.
+    </div>
+  </div>
+  <script>
+    const form = document.getElementById("authForm");
+    const alertBox = document.getElementById("alertBox");
+    const btn = document.getElementById("submitBtn");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      alertBox.style.display = "none";
+      btn.disabled = true;
+      btn.innerText = "校验凭据中...";
+
+      try {
+        const res = await fetch("/api/sys/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: document.getElementById("username").value.trim(),
+            password: document.getElementById("password").value
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          btn.innerText = "认证成功，正在载入...";
+          window.location.reload();
+        } else {
+          alertBox.innerText = data.message || "账号或密钥校验失败，请核对后重试";
+          alertBox.style.display = "block";
+          btn.disabled = false;
+          btn.innerText = "进入控制台";
+        }
+      } catch (err) {
+        alertBox.innerText = "网关通信异常，请稍后再试";
+        alertBox.style.display = "block";
+        btn.disabled = false;
+        btn.innerText = "进入控制台";
+      }
+    });
+  </script>
+</body>
+</html>\`;
+
 const API_ORIGIN = "https://api.cloudflareclient.com";
 const API_VERSION = "v0a4471";
 
@@ -213,6 +425,51 @@ async function relayEnroll(request) {
 
 export default {
   async fetch(request, env, ctx) {
+const url = new URL(request.url);
+
+// 1. Session Gateway Authentication
+if (env.AUTH_PASS) {
+  const expectedToken = await getAuthToken(env.AUTH_PASS);
+  const userToken = getSessionCookie(request);
+
+  // 登录校验端点
+  if (url.pathname === "/api/sys/auth" && request.method === "POST") {
+    try {
+      const body = await request.json();
+      const expectedUser = env.AUTH_USER || "admin";
+      if (body.username === expectedUser && body.password === env.AUTH_PASS) {
+        return new Response(JSON.stringify({ success: true, message: "OK" }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Set-Cookie": \`sys_auth_token=\${expectedToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000\`
+          }
+        });
+      }
+      return new Response(JSON.stringify({ success: false, message: "安全凭据校验失败，请核对后重试" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json; charset=utf-8" }
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ success: false, message: "无效的请求格式" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json; charset=utf-8" }
+      });
+    }
+  }
+
+  // 未登录态拦截
+  if (userToken !== expectedToken) {
+    if (url.pathname.startsWith("/api/")) {
+      return json({ message: "Authentication required", code: 401 }, 401);
+    }
+    return new Response(LOGIN_PAGE_HTML, {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" }
+    });
+  }
+}
+
 // === Universal Environment Auth Guard ===
 if (env.AUTH_PASS) {
   const expectedUser = env.AUTH_USER || "admin";

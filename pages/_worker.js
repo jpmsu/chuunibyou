@@ -212,7 +212,25 @@ async function relayEnroll(request) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
+// === Universal Environment Auth Guard ===
+if (env.AUTH_PASS) {
+  const expectedUser = env.AUTH_USER || "admin";
+  const authHeader = request.headers.get("Authorization");
+  const expectedAuth = "Basic " + btoa(expectedUser + ":" + env.AUTH_PASS);
+
+  if (!authHeader || authHeader !== expectedAuth) {
+    return new Response("Unauthorized: Protected by Cloudflare Pages", {
+      status: 401,
+      headers: {
+        "WWW-Authenticate": "Basic realm=\"Restricted Access\"",
+        "Content-Type": "text/plain; charset=utf-8"
+      }
+    });
+  }
+}
+// ========================================
+
     const url = new URL(request.url);
 
     // Quick deployment test:
@@ -239,6 +257,6 @@ export default {
       return relayEnroll(request);
     }
 
-    return json({ message: "API Not Found" }, 404);
+    return env.ASSETS ? env.ASSETS.fetch(request) : json({ message: "API Not Found" }, 404);
   }
 };

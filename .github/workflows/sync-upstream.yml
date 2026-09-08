@@ -1,60 +1,87 @@
-name: Sync Upstream (Keep Custom README)
+name: Sync Upstream & Origin Secure Lock
 
 on:
   schedule:
-    # 每天北京时间早上 8:00 (UTC 0:00) 自动检查并同步一次
+    # 每天凌晨 0 点自动拉取上游更新
     - cron: '0 0 * * *'
-  workflow_dispatch: # 支持在 GitHub Actions 页面随时手动点击“Run workflow”一键同步
-
-# 必须授予仓库内容写入权限
-permissions:
-  contents: write
+  workflow_dispatch: # 支持手动一键运行
 
 jobs:
-  sync:
+  sync-and-lock:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout Fork Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          ref: main
-          fetch-depth: 0 # 获取完整提交历史，确保 3-way merge 正常运作
+          fetch-depth: 0
 
-      - name: Configure Git Identity
+      - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Fetch Upstream
+      - name: Fetch and Merge Upstream
         run: |
-          git remote add upstream https://github.com/KJGX66F/usque-custom-pro.git
+          git remote add upstream https://github.com/KJGX66F/usque-custom-pro.git || true
           git fetch upstream main
-
-      - name: Sync & Preserve README
-        run: |
-          UPSTREAM_REV=$(git rev-parse upstream/main)
-          MERGE_BASE=$(git merge-base HEAD upstream/main)
-
-          # 1. 检查上游是否有新提交，若无更新则直接退出，节省 Actions 额度
-          if [ "$UPSTREAM_REV" = "$MERGE_BASE" ]; then
-            echo "✅ 已经是最新状态，上游没有新提交，无需同步。"
-            exit 0
-          fi
-
-          echo "🚀 检测到上游有更新，开始执行安全合并..."
-
-          # 2. 尝试不自动提交地合并上游 main 分支
-          # 即使上游修改了 README.md 产生冲突，|| true 也能确保脚本不中断
+          # 仅拉取变更，暂不提交，保留我们自己的 README.md
           git merge upstream/main --no-commit --no-ff || true
+          git checkout HEAD -- README.md 2>/dev/null || true
 
-          # 3. 核心铁律：强制用我们 fork 仓库已有的 README.md 覆盖任何改动或冲突状态
-          git checkout HEAD -- README.md
+      - name: Apply Universal Auth Hook (Zero-Secret)
+        run: |
+          # 1. 移除 _routes.json，强制 Pages 全站（含首页静态页面）全部走 _worker.js 拦截
+          rm -f pages/_routes.json
 
-          # 4. 检查除了 README 之外是否有代码变更需要提交
-          if git diff-index --quiet HEAD --; then
-            echo "上游仅更新了 README，无实质代码变动，跳过提交。"
+          # 2. 注入通用环境变量鉴权逻辑（不含任何明文密码）
+          node -e '
+          const fs = require("fs");
+          const file = "pages/_worker.js";
+          let code = fs.readFileSync(file, "utf8");
+
+          // 注入的脱敏鉴权中间件逻辑：读取 Cloudflare 后台的 env.AUTH_PASS
+          const authMiddleware = `
+          // === Universal Environment Auth Guard ===
+          if (env.AUTH_PASS) {
+            const expectedUser = env.AUTH_USER || "admin";
+            const authHeader = request.headers.get("Authorization");
+            const expectedAuth = "Basic " + btoa(expectedUser + ":" + env.AUTH_PASS);
+
+            if (!authHeader || authHeader !== expectedAuth) {
+              return new Response("Unauthorized: Protected by Cloudflare Pages", {
+                status: 401,
+                headers: {
+                  "WWW-Authenticate": "Basic realm=\\"Restricted Access\\"",
+                  "Content-Type": "text/plain; charset=utf-8"
+                }
+              });
+            }
+          }
+          // ========================================
+          `;
+
+          // 在 fetch(request) 或 fetch(request, env) 入口处注入鉴权
+          code = code.replace(/async\s+fetch\s*\(\s*request\s*(\,\s*env)?\s*(\,\s*ctx)?\s*\)\s*\{/, "async fetch(request, env, ctx) {" + authMiddleware);
+
+          // 确保未匹配 API 时正确回退到静态前端页面
+          code = code.replace(
+            /return\s+json\(\{\s*message:\s*"API Not Found"\s*\}\,\s*404\);/,
+            "return env.ASSETS ? env.ASSETS.fetch(request) : json({ message: \"API Not Found\" }, 404);"
+          );
+
+          fs.writeFileSync(file, code, "utf8");
+          console.log("Universal Auth Guard injected successfully.");
+          '
+
+      - name: Commit and Push Changes
+        run: |
+          git add pages/
+          if git diff --staged --quiet; then
+            echo "No changes detected. Repository is up to date."
           else
-            git commit -m "chore: auto sync upstream (preserve custom README)"
+            git commit -m "chore: sync upstream and enforce env-based auth lock"
             git push origin main
-            echo "🎉 同步成功！已合并上游代码并保留了自建 README.md"
           fi

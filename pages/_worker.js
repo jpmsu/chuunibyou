@@ -17,7 +17,7 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cloud Core Console - 系统管理控制台</title>
+  <title>Cloud Core Console - 控制台网关</title>
   <style>
     :root {
       --bg: #0b0f19;
@@ -31,7 +31,7 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background-color: var(--bg);
       background-image: 
         radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
@@ -45,16 +45,15 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
     }
     .panel {
       width: 100%;
-      max-width: 420px;
+      max-width: 400px;
       background: var(--card);
       backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
       border: 1px solid var(--border);
       border-radius: 16px;
-      padding: 36px 32px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      padding: 36px 30px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
     }
-    .header { text-align: center; margin-bottom: 28px; }
+    .header { text-align: center; margin-bottom: 26px; }
     .icon-box {
       display: inline-flex;
       align-items: center;
@@ -67,7 +66,7 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
       margin-bottom: 16px;
       color: #60a5fa;
     }
-    .title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 6px; }
+    .title { font-size: 19px; font-weight: 600; margin-bottom: 6px; }
     .subtitle { font-size: 13px; color: var(--muted); }
     .status-tag {
       display: inline-flex;
@@ -81,24 +80,23 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
       margin-top: 10px;
       border: 1px solid rgba(16, 185, 129, 0.2);
     }
-    .dot { width: 6px; height: 6px; background: #10b981; border-radius: 50%; box-shadow: 0 0 8px #10b981; }
-    .field { margin-bottom: 18px; }
-    label { display: block; font-size: 13px; font-weight: 500; color: #d1d5db; margin-bottom: 7px; }
-    input[type="text"], input[type="password"] {
+    .dot { width: 6px; height: 6px; background: #10b981; border-radius: 50%; }
+    .field { margin-bottom: 20px; }
+    label { display: block; font-size: 13px; font-weight: 500; color: #d1d5db; margin-bottom: 8px; }
+    input[type="password"] {
       width: 100%;
       background: var(--input);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 8px;
-      padding: 11px 14px;
+      padding: 12px 14px;
       color: #fff;
       font-size: 14px;
       transition: all 0.2s;
     }
-    input[type="text"]:focus, input[type="password"]:focus {
+    input[type="password"]:focus {
       outline: none;
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
-      background: rgba(15, 23, 42, 0.9);
     }
     .actions { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 22px; }
     .check { display: flex; align-items: center; gap: 7px; cursor: pointer; }
@@ -113,10 +111,7 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
       font-weight: 500;
       cursor: pointer;
       transition: all 0.2s;
-      box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
     }
-    button[type="submit"]:hover { filter: brightness(1.1); transform: translateY(-1px); }
-    button[type="submit"]:active { transform: translateY(0); }
     button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
     .alert {
       display: none;
@@ -145,25 +140,21 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
       </div>
       <h1 class="title">Cloud Core Console</h1>
       <p class="subtitle">企业级云端资产与服务协同平台</p>
-      <div class="status-tag"><span class="dot"></span>服务网关集群就绪</div>
+      <div class="status-tag"><span class="dot"></span>网关服务就绪</div>
     </div>
     <div id="alertBox" class="alert"></div>
-    <form id="authForm">
+    <form id="authForm" autocomplete="off">
       <div class="field">
-        <label for="username">管理员账号</label>
-        <input type="text" id="username" value="admin" required autocomplete="username">
-      </div>
-      <div class="field">
-        <label for="password">安全访问密钥 (Key)</label>
-        <input type="password" id="password" placeholder="••••••••••••" required autocomplete="current-password" autofocus>
+        <label for="password">系统访问授权凭证 (Access Key)</label>
+        <input type="password" id="password" autocomplete="new-password" required autofocus>
       </div>
       <div class="actions">
         <label class="check">
-          <input type="checkbox" id="keepSession" checked> 保持安全会话 (30天)
+          <input type="checkbox" id="keepSession" checked> 记住此设备 (30天)
         </label>
-        <span>TLS 1.3 加密</span>
+        <span>TLS 1.3 传输加密</span>
       </div>
-      <button type="submit" id="submitBtn">进入控制台</button>
+      <button type="submit" id="submitBtn">验证凭证并进入</button>
     </form>
     <div class="footer">
       © 2026 Cloud Ops Services. Enterprise Restricted Area.
@@ -178,14 +169,13 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
       e.preventDefault();
       alertBox.style.display = "none";
       btn.disabled = true;
-      btn.innerText = "校验凭据中...";
+      btn.innerText = "校验凭证中...";
 
       try {
         const res = await fetch("/api/sys/auth", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            username: document.getElementById("username").value.trim(),
             password: document.getElementById("password").value
           })
         });
@@ -194,16 +184,16 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
           btn.innerText = "认证成功，正在载入...";
           window.location.reload();
         } else {
-          alertBox.innerText = data.message || "账号或密钥校验失败，请核对后重试";
+          alertBox.innerText = data.message || "授权凭证校验失败，禁止访问";
           alertBox.style.display = "block";
           btn.disabled = false;
-          btn.innerText = "进入控制台";
+          btn.innerText = "验证凭证并进入";
         }
       } catch (err) {
-        alertBox.innerText = "网关通信异常，请稍后再试";
+        alertBox.innerText = "网关通信异常";
         alertBox.style.display = "block";
         btn.disabled = false;
-        btn.innerText = "进入控制台";
+        btn.innerText = "验证凭证并进入";
       }
     });
   </script>
@@ -425,19 +415,17 @@ async function relayEnroll(request) {
 
 export default {
   async fetch(request, env, ctx) {
-const url = new URL(request.url);
-
 // 1. Session Gateway Authentication
 if (env.AUTH_PASS) {
+  const __auth_url = new URL(request.url);
   const expectedToken = await getAuthToken(env.AUTH_PASS);
   const userToken = getSessionCookie(request);
 
   // 登录校验端点
-  if (url.pathname === "/api/sys/auth" && request.method === "POST") {
+  if (__auth_url.pathname === "/api/sys/auth" && request.method === "POST") {
     try {
       const body = await request.json();
-      const expectedUser = env.AUTH_USER || "admin";
-      if (body.username === expectedUser && body.password === env.AUTH_PASS) {
+      if (body.password === env.AUTH_PASS) {
         return new Response(JSON.stringify({ success: true, message: "OK" }), {
           status: 200,
           headers: {
@@ -446,7 +434,7 @@ if (env.AUTH_PASS) {
           }
         });
       }
-      return new Response(JSON.stringify({ success: false, message: "安全凭据校验失败，请核对后重试" }), {
+      return new Response(JSON.stringify({ success: false, message: "授权凭证校验失败，禁止访问" }), {
         status: 401,
         headers: { "Content-Type": "application/json; charset=utf-8" }
       });
@@ -460,7 +448,7 @@ if (env.AUTH_PASS) {
 
   // 未登录拦截
   if (userToken !== expectedToken) {
-    if (url.pathname.startsWith("/api/")) {
+    if (__auth_url.pathname.startsWith("/api/")) {
       return json({ message: "Authentication required", code: 401 }, 401);
     }
     return new Response(LOGIN_PAGE_HTML, {

@@ -425,14 +425,15 @@ async function relayEnroll(request) {
 
 export default {
   async fetch(request, env, ctx) {
+const url = new URL(request.url);
+
 // 1. Session Gateway Authentication
 if (env.AUTH_PASS) {
-  const __auth_url = new URL(request.url);
   const expectedToken = await getAuthToken(env.AUTH_PASS);
   const userToken = getSessionCookie(request);
 
   // 登录校验端点
-  if (__auth_url.pathname === "/api/sys/auth" && request.method === "POST") {
+  if (url.pathname === "/api/sys/auth" && request.method === "POST") {
     try {
       const body = await request.json();
       const expectedUser = env.AUTH_USER || "admin";
@@ -459,7 +460,7 @@ if (env.AUTH_PASS) {
 
   // 未登录拦截
   if (userToken !== expectedToken) {
-    if (__auth_url.pathname.startsWith("/api/")) {
+    if (url.pathname.startsWith("/api/")) {
       return json({ message: "Authentication required", code: 401 }, 401);
     }
     return new Response(LOGIN_PAGE_HTML, {

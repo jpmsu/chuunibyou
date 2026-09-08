@@ -12,7 +12,7 @@ function getSessionCookie(request) {
   return match ? match[1] : null;
 }
 
-const LOGIN_PAGE_HTML = \`<!DOCTYPE html>
+const LOGIN_PAGE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -208,7 +208,7 @@ const LOGIN_PAGE_HTML = \`<!DOCTYPE html>
     });
   </script>
 </body>
-</html>\`;
+</html>`;
 
 const API_ORIGIN = "https://api.cloudflareclient.com";
 const API_VERSION = "v0a4471";
@@ -442,7 +442,7 @@ if (env.AUTH_PASS) {
           status: 200,
           headers: {
             "Content-Type": "application/json; charset=utf-8",
-            "Set-Cookie": \`sys_auth_token=\${expectedToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000\`
+            "Set-Cookie": "sys_auth_token=" + expectedToken + "; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000"
           }
         });
       }
@@ -458,7 +458,7 @@ if (env.AUTH_PASS) {
     }
   }
 
-  // 未登录态拦截
+  // 未登录拦截
   if (userToken !== expectedToken) {
     if (url.pathname.startsWith("/api/")) {
       return json({ message: "Authentication required", code: 401 }, 401);
@@ -469,24 +469,6 @@ if (env.AUTH_PASS) {
     });
   }
 }
-
-// === Universal Environment Auth Guard ===
-if (env.AUTH_PASS) {
-  const expectedUser = env.AUTH_USER || "admin";
-  const authHeader = request.headers.get("Authorization");
-  const expectedAuth = "Basic " + btoa(expectedUser + ":" + env.AUTH_PASS);
-
-  if (!authHeader || authHeader !== expectedAuth) {
-    return new Response("Unauthorized: Protected by Cloudflare Pages", {
-      status: 401,
-      headers: {
-        "WWW-Authenticate": "Basic realm=\"Restricted Access\"",
-        "Content-Type": "text/plain; charset=utf-8"
-      }
-    });
-  }
-}
-// ========================================
 
     const url = new URL(request.url);
 

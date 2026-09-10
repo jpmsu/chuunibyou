@@ -312,3 +312,43 @@ footer{text-align:center;color:#67859a;font-size:12px;padding-top:22px}
 .dynamic-country-note code{
   display:inline-block;padding:1px 5px;border-radius:5px;background:rgba(0,0,0,.22);margin:0 2px
 }
+/* GitHub source button */
+.github-btn{
+
+display:inline-flex;
+
+align-items:center;
+justify-content:center;
+
+margin:18px auto;
+
+padding:10px 24px;
+
+border-radius:999px;
+
+background:#161b22;
+
+color:#fff;
+
+text-decoration:none;
+
+font-weight:700;
+
+font-size:14px;
+
+border:1px solid #30363d;
+
+transition:.25s ease;
+
+}
+
+
+.github-btn:hover{
+
+background:#238636;
+
+border-color:#3fb950;
+
+transform:translateY(-2px);
+
+}

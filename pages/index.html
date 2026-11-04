@@ -6,12 +6,12 @@
   <meta name="color-scheme" content="dark">
   <meta name="description" content="Usque MASQUE 小白友好转换工具：网页一键注册并保存原生 config.json，再生成 Clash/Mihomo 智能分流；可选 US/JP/SG 等公开免费落地节点，并通过 WARP/MASQUE 中转连接。">
   <title>Usque MASQUE · 免费落地节点池</title>
-  <link rel="stylesheet" href="./style.css?v=617">
+  <link rel="stylesheet" href="./style.css?v=621">
 </head>
 <body>
 <main class="wrap pro-wrap">
   <header class="hero pro-hero">
-    <span class="badge">v6.17 · 动态地区规则 + 完整策略组</span>
+    <span class="badge">v6.27 · 延迟优化：入口与测速参数调优</span>
     <h1>Usque MASQUE → Clash 小白版</h1>
 
     <a 
@@ -40,6 +40,22 @@
       <b>部署：</b>保持原项目不变：Cloudflare Pages 仍然使用 <code>pages/</code> 根目录，原视频教程无需重录。
     </div>
   </header>
+
+  <div id="updateBanner" class="update-banner hidden">
+    <span id="updateBannerText"></span>
+    <a id="updateBannerLink" href="#" target="_blank" rel="noopener">查看更新</a>
+    <button id="updateBannerClose" type="button">✕ 这个版本不再提醒</button>
+  </div>
+
+  <div class="wizard-card">
+    <b>🧭 新手向导</b>
+    <ol class="wizard-steps">
+      <li id="wizStep1"><span class="wiz-check"></span>注册或导入 WARP 账户 <button id="wizDemo" type="button">🎬 没账号？先用演示模式看看</button></li>
+      <li id="wizStep2"><span class="wiz-check"></span>在下方选格式生成配置（推荐 Clash / Mihomo）</li>
+      <li id="wizStep3"><span class="wiz-check"></span>下载文件导入客户端，或用「扫码获取订阅」手机导入</li>
+    </ol>
+    <p class="wizard-note">完成一步会自动打勾。演示模式用的是假数据，只能看生成效果，不能真的连接。</p>
+  </div>
 
   <!-- STEP 1 -->
   <section class="card step">
@@ -107,6 +123,18 @@
       <div id="loadedFile" class="loaded-file hidden"></div>
     </label>
 
+    <div class="accounts-box">
+      <div class="row tight">
+        <b>🗂 账户库</b>
+        <select id="accountSelect"><option value="">（暂无保存的账户）</option></select>
+        <button id="accountSwitch" type="button">切换到所选账户</button>
+        <button id="accountSave" type="button">存入当前账户</button>
+        <button id="accountDelete" type="button">删除所选</button>
+      </div>
+      <p class="accounts-note">注册过多个 WARP 账户时可以都存进这里，一键切换，不用反复导入文件。账户（含私钥）只保存在这台浏览器本地，公用电脑上不要存。</p>
+      <p id="accountMsg" class="accounts-note hidden"></p>
+    </div>
+
     <div class="source-actions">
       <button id="showNative" disabled>查看原生 JSON</button>
       <button id="copyNative" disabled>复制原生 JSON</button>
@@ -151,6 +179,12 @@
           <input id="freeUseWarp" type="checkbox" checked>
           <span>订阅下载 + 节点连接都经过 WARP / MASQUE（推荐）</span>
         </label>
+
+        <label class="switch-pro">
+          <input id="freeMultiSource" type="checkbox" checked>
+          <span>多源合并：再加 4 个公共源一起拉取、测活竞速（可用节点更多）</span>
+        </label>
+
 
         <label>
           <span>哪些服务走免费落地</span>
@@ -224,11 +258,23 @@
       </div>
 
       <details class="free-source-details">
-        <summary>查看节点来源与说明</summary>
+        <summary>📚 查看节点来源与说明（内置 5 个源 · 可添加自定义源）</summary>
         <div>
-          <p>主源：<code>Au1rxx/free-vpn-subscriptions</code>。按国家提供 Clash YAML，并持续自动更新。</p>
-          <p>默认稳定模式会排除 Hysteria2 / TUIC / WireGuard / HTTP / SOCKS 等，更优先测试 VLESS / VMess / Trojan / Shadowsocks。</p>
-          <a href="https://github.com/Au1rxx/free-vpn-subscriptions" target="_blank" rel="noopener">打开节点源项目</a>
+          <p><b>内置节点源（共 5 个，全部一起拉取、在同一批自动测速组里竞速，哪个快用哪个）：</b></p>
+          <ul class="source-list">
+            <li><b>主源 · Au1rxx/free-vpn-subscriptions</b>（按国家 Clash YAML，每小时更新）<a href="https://github.com/Au1rxx/free-vpn-subscriptions" target="_blank" rel="noopener">项目</a><br><code>raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/clash-国家代码.yaml</code>（按上方勾选的国家逐个拉取）</li>
+            <li><b>ermaozi</b> <a href="https://github.com/ermaozi/get_subscribe" target="_blank" rel="noopener">项目</a><br><code>raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt</code></li>
+            <li><b>cbusifabcap</b> <a href="https://github.com/cbusifabcap/daily_free_vpn" target="_blank" rel="noopener">项目</a><br><code>raw.githubusercontent.com/cbusifabcap/daily_free_vpn/main/Z.txt</code></li>
+            <li><b>LeilaoMi真测</b> <a href="https://github.com/LeilaoMi/AutoMergePublicNodes-Optimized" target="_blank" rel="noopener">项目</a><br><code>raw.githubusercontent.com/LeilaoMi/AutoMergePublicNodes-Optimized/main/output/global.urls</code></li>
+            <li><b>ALIILAPRO</b> <a href="https://github.com/ALIILAPRO/v2rayNG-Config" target="_blank" rel="noopener">项目</a><br><code>raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt</code></li>
+          </ul>
+          <p>后 4 个源受上方「多源合并」开关控制（默认开）；它们不分国家，只进「免费落地自动 / AI / 流媒体」总组，不进国家组。不同源之间可能有个别重复节点，测速会自动选最快的一个，不影响使用。</p>
+          <p>默认稳定模式会排除 Hysteria2 / TUIC / WireGuard / HTTP / SOCKS 等，更优先测试 VLESS / VMess / Trojan / Shadowsocks；想要全部协议，把上方「协议筛选」切到「全部协议」。所有源都由你的 Clash 客户端每小时自动重新拉取最新节点，本页面不保存、也不中转任何节点。</p>
+          <div class="custom-source-box">
+            <label for="freeCustomSources"><b>➕ 添加自定义节点源</b>（每行一个订阅地址，Clash YAML 或链接列表都行；留空不用，最多 10 个）</label>
+            <textarea id="freeCustomSources" rows="3" placeholder="https://example.com/my-nodes.yaml"></textarea>
+            <p class="custom-source-tip">填了自定义源会和内置源一起拉取测速；只填自定义源、不勾任何国家也能单独使用。想换掉内置源：关掉上方「多源合并」并取消国家勾选、只留自定义源即可。</p>
+          </div>
         </div>
       </details>
     </div>
@@ -294,7 +340,8 @@
       <label>
         <span>SNI 域名</span>
         <select id="sniPreset">
-          <option value="www.microsoft.com">微软 | www.microsoft.com（推荐）</option>
+          <option value="speed.cloudflare.com">Cloudflare 测速 | speed.cloudflare.com（推荐）</option>
+          <option value="www.microsoft.com">微软 | www.microsoft.com</option>
           <option value="www.wikipedia.org">维基百科 | www.wikipedia.org</option>
           <option value="www.unilever.com">联合利华 | www.unilever.com</option>
           <option value="www.luckincoffee.com">瑞幸咖啡 | www.luckincoffee.com</option>
@@ -307,7 +354,6 @@
           <option value="cdn.jsdelivr.net">CDN 分发 | cdn.jsdelivr.net</option>
           <option value="www.speedtest.net">SpeedTest | www.speedtest.net</option>
           <option value="www.cloudflare.com">Cloudflare 官网 | www.cloudflare.com</option>
-          <option value="speed.cloudflare.com">Cloudflare 测速 | speed.cloudflare.com</option>
           <option value="cloudflare.dev">Cloudflare 开发者 | cloudflare.dev</option>
           <option value="research.cloudflare.com">Cloudflare 研究团队 | research.cloudflare.com</option>
           <option value="consumer-masque.cloudflareclient.com">MASQUE 默认 | consumer-masque.cloudflareclient.com</option>
@@ -319,6 +365,13 @@
       <label id="customSniWrap" class="hidden">
         <span>自定义 SNI</span>
         <input id="customSni" placeholder="example.com">
+      </label>
+
+      <label class="switch-pro"><input id="sniRotate" type="checkbox"><span>SNI 候选池轮换（生成的节点轮流使用不同 SNI）</span></label>
+
+      <label id="sniCandidatesWrap" class="hidden">
+        <span>SNI 候选（逗号分隔）</span>
+        <input id="sniCandidates" value="www.microsoft.com,www.wikipedia.org,www.cloudflare.com,speed.cloudflare.com,cdn.jsdelivr.net">
       </label>
 
       <label>
@@ -415,9 +468,9 @@
       <label>
         <span>MTU</span>
         <select id="mtuPreset">
-          <option value="1280">1280（推荐）</option>
+          <option value="1280">1280（稳定档 · 推荐）</option>
           <option value="1360">1360</option>
-          <option value="1400">1400</option>
+          <option value="1400">1400（速度档）</option>
           <option value="1500">1500</option>
           <option value="custom">自定义</option>
         </select>
@@ -431,11 +484,12 @@
       <label>
         <span>握手超时</span>
         <select id="handshakeTimeout">
-          <option value="0">默认（0）</option>
+          <option value="5">5 秒（推荐）</option>
           <option value="10">10 秒</option>
           <option value="20">20 秒</option>
           <option value="30">30 秒</option>
           <option value="45">45 秒</option>
+          <option value="0">不限制（0）</option>
         </select>
       </label>
 
@@ -478,8 +532,8 @@
       <label>
         <span>测速容差</span>
         <select id="healthTolerance">
+          <option value="50">50 ms（推荐）</option>
           <option value="30">30 ms</option>
-          <option value="50">50 ms</option>
           <option value="100">100 ms</option>
         </select>
       </label>
@@ -497,10 +551,11 @@
       <label>
         <span>节点数量模式</span>
         <select id="nodeCountMode">
-          <option value="13">精选 13 节点（推荐）</option>
-          <option value="32">增强 32 节点</option>
-          <option value="64">全量 64 节点</option>
-          <option value="100">超全量 100 节点</option>
+          <option value="48">甜点 48 节点（推荐）</option>
+          <option value="32">轻量 32 节点</option>
+          <option value="64">增强 64 节点</option>
+          <option value="13">精选 13 节点</option>
+          <option value="100">100 节点（节点多更卡，不推荐）</option>
           <option value="custom">自定义数量</option>
         </select>
       </label>
@@ -540,7 +595,7 @@
       <label class="switch-pro"><input id="adBlock" type="checkbox" checked><span>广告拦截</span></label>
       <label class="switch-pro"><input id="includeTestEndpoints" type="checkbox" checked><span>包含测试域名 Endpoint</span></label>
       <label class="switch-pro"><input id="dedupeNodes" type="checkbox" checked><span>节点自动去重</span></label>
-      <label class="switch-pro"><input id="h2ExtendedPool" type="checkbox" checked><span>H2 扩展地址池（100～500 节点）</span></label>
+      <label class="switch-pro"><input id="h2ExtendedPool" type="checkbox" checked><span>H2 扩展地址池（100～500 节点 · 随机抽样、未逐个验证）</span></label>
     </div>
 
       </div>
@@ -691,6 +746,21 @@
     </div>
     </details>
 
+    <details class="chain-box">
+      <summary>⛓ 链式出口（可选，点击展开设置）</summary>
+      <p class="chain-note">让流量先过 WARP、再从你指定的二级代理出去（WARP → 二级代理 → 目标网站）。常见用法：填 Opera 浏览器代理的凭据，或你本机在跑的 opera-proxy 地址，落地就多一个 Opera 出口可选。仅 Clash / Mihomo 格式生效，生成的节点在「🚀 节点选择」里多一个「⛓ 链式出口」。</p>
+      <div class="settings-grid">
+        <label class="switch-pro"><input id="chainEnabled" type="checkbox"><span>启用链式出口</span></label>
+        <label><span>二级代理协议</span><select id="chainType"><option value="http">HTTP</option><option value="socks5">SOCKS5</option></select></label>
+        <label><span>二级代理地址</span><input id="chainHost" placeholder="如 127.0.0.1 或代理域名"></label>
+        <label><span>二级代理端口</span><input id="chainPort" type="number" placeholder="如 18080"></label>
+        <label><span>账号（没有可留空）</span><input id="chainUser"></label>
+        <label><span>密码（没有可留空）</span><input id="chainPass" type="password"></label>
+      </div>
+    </details>
+
+    <p id="poolStatus" class="pool-status">端点池：内置（正在尝试读取远程清单…）</p>
+
     <div id="nodeEstimate" class="estimate">预计生成：13 个节点</div>
 
     <div class="row">
@@ -746,6 +816,69 @@
       </div>
     </div>
 
+    <div id="subQrArea" class="sub-qr-area hidden">
+      <div class="row tight">
+        <button id="makeSubQr" type="button">📱 扫码获取订阅（生成二维码）</button>
+        <span class="sub-qr-hint">把当前格式的配置托管到本站，手机扫码即可导入，不用手动传文件。有效期可选 24 小时 / 7 天 / 常驻。</span>
+      </div>
+      <div class="row tight">
+        <label for="subTier">订阅有效期：</label>
+        <select id="subTier">
+          <option value="24h" selected>24 小时（最安全，到期自动失效）</option>
+          <option value="7d">7 天</option>
+          <option value="perm">常驻（长期有效，可更新内容、可轮换吊销）</option>
+        </select>
+      </div>
+      <p id="subNativeWarn" class="sub-native-warn hidden">⚠️ 当前是「原生 Usque config.json」格式：生成的订阅链接是 JSON 文件，Clash Verge / FlClash 等客户端<b>无法直接导入</b>（会报导入失败）。要在客户端用订阅，请先切换到 <b>Clash / Mihomo</b> 格式再生成。</p>
+      <div id="subQrPanel" class="sub-qr-panel hidden">
+        <div id="subQrBox" class="sub-qr-box"></div>
+        <div class="sub-qr-side">
+          <p><b id="subQrValidity">订阅链接：</b></p>
+          <p><a id="subQrLink" href="#" target="_blank" rel="noopener"></a></p>
+          <p class="sub-qr-warn">⚠️ 链接里包含你的 WARP 私钥，只扫自己的设备，不要外传、不要截图发群。</p>
+          <p id="subQrTip" class="sub-qr-tip"></p>
+          <div id="subImportRow" class="row tight hidden">
+            <span>一键导入到客户端：</span>
+            <a id="importClash" class="hidden" href="#">Clash / Mihomo</a>
+            <a id="importShadowrocket" class="hidden" href="#">Shadowrocket</a>
+            <a id="importSingbox" class="hidden" href="#">sing-box</a>
+            <a id="importV2rayNG" class="hidden" href="#">v2rayNG</a>
+          </div>
+        </div>
+      </div>
+      <p id="subQrError" class="sub-qr-error hidden"></p>
+      <div id="permSubBox" class="perm-sub-box hidden">
+        <p><b>🔑 我的常驻订阅</b>（链接不变：换配置点「更新为当前配置」即可，不用重新扫码）</p>
+        <p><a id="permSubLink" href="#" target="_blank" rel="noopener"></a></p>
+        <div class="row tight">
+          <button id="permSubUpdate" type="button">更新为当前配置</button>
+          <button id="permSubRotate" type="button">轮换链接（旧链接立即失效）</button>
+          <button id="permSubRevoke" type="button">删除常驻订阅</button>
+        </div>
+        <p class="perm-sub-note">常驻链接长期有效且包含私钥：不要外传；怀疑泄露就点「轮换链接」，旧链接立刻作废、新链接要重新导入一次。</p>
+        <p id="permSubMsg" class="perm-sub-msg hidden"></p>
+      </div>
+    </div>
+
+    <div id="subManageBox" class="sub-manage-box">
+      <p><b>🔑 恢复常驻订阅管理</b>（换了浏览器 / 设备时：在这里粘贴你以前的常驻订阅链接，就能继续更新、轮换、删除它）</p>
+      <div class="row tight">
+        <input id="permRestoreInput" type="text" placeholder="粘贴常驻订阅链接（…/sub/…）">
+        <button id="permRestoreBtn" type="button">恢复管理</button>
+      </div>
+      <p id="permRestoreMsg" class="perm-sub-msg hidden"></p>
+      <p><b>📋 全部已发订阅</b>（仅部署者：需要先在 Cloudflare 设置 SUB_OWNER_KEY 才能查看）</p>
+      <div class="row tight">
+        <button id="subListBtn" type="button">查看全部已发订阅</button>
+        <span id="subListHint" class="sub-qr-hint"></span>
+      </div>
+      <div id="subListBox" class="sub-list-box hidden"></div>
+      <div class="row tight">
+        <button id="exportDiagnostics" type="button">🩺 导出诊断信息（脱敏）</button>
+        <span class="sub-qr-hint">使用出问题时把这个文件发给维护者排查：不含私钥、令牌等敏感信息。</span>
+      </div>
+    </div>
+
     <textarea id="mainOutput" readonly spellcheck="false"
       placeholder="先完成注册，或导入已有 config.json"></textarea>
 
@@ -762,7 +895,8 @@
 
 <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
-<script src="./usque-register.js?v=617"></script>
-<script src="./app.js?v=617"></script>
+<script src="./qrcode.js?v=621"></script>
+<script src="./usque-register.js?v=621"></script>
+<script src="./app.js?v=627"></script>
 </body>
 </html>

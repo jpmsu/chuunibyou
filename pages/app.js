@@ -19,6 +19,8 @@ const ENDPOINTS={
   bestcf1:"masque1.bestcf.eu.cc",
   bestcf2:"masque2.bestcf.eu.cc"
 };
+let remoteCuratedPairs=null,remoteTestPairs=null,remoteH2Prefixes=null;
+let currentPairServers=[];
 const DNS_PRESETS={
   "cf-google-dual":["1.1.1.1","8.8.8.8","2606:4700:4700::1111","2001:4860:4860::8888"],
   "cf-dual":["1.1.1.1","1.0.0.1","2606:4700:4700::1111","2606:4700:4700::1001"],
@@ -161,6 +163,7 @@ function parseUsque(text){
  return d;
 }
 function enableOutputs(){
+ $("subQrArea")?.classList.remove("hidden");
  ["fmtNative","fmtClash","fmtShadowrocket","fmtSingbox","fmtVless"].forEach(id=>$(id).disabled=false);
  ["downloadOriginal","showNative","copyNative","downloadNative2"].forEach(id=>$(id).disabled=false);
 }
@@ -230,11 +233,16 @@ function portList(){
  return [Number(p)||443];
 }
 function curatedPairs(){
+ if(remoteCuratedPairs&&remoteCuratedPairs.length){
+  const rp=remoteCuratedPairs.map(p=>[String(p[0]),Number(p[1])]);
+  if($("includeTestEndpoints").checked&&(remoteTestPairs||[]).length)rp.push(...remoteTestPairs.map(p=>[String(p[0]),Number(p[1])]));
+  return rp;
+ }
  const pairs=[
-  ["162.159.198.1",443],
-  ["162.159.198.1",500],
   ["162.159.198.2",443],
+  ["162.159.198.1",443],
   ["162.159.198.2",500],
+  ["162.159.198.1",500],
   ["162.159.198.2",4500],
   ["162.159.198.2",8095],
   ["2606:4700:103::1",443],
@@ -299,10 +307,16 @@ function expandedPortList(){
  return portList();
 }
 
+function h2PriorityEndpoints(){
+ const prefixes=(remoteH2Prefixes&&remoteH2Prefixes.length?remoteH2Prefixes:["162.159.198","162.159.199"]);
+ const out=[];
+ for(const p of prefixes){out.push(`${p}.1`,`${p}.2`);}
+ return out;
+}
 function h2Ipv4Endpoints(limit=508){
  const out=[];
  // warpscout currently treats these two /24s as the H2 IPv4 pool.
- for(const prefix of ["162.159.198","162.159.199"]){
+ for(const prefix of (remoteH2Prefixes&&remoteH2Prefixes.length?remoteH2Prefixes:["162.159.198","162.159.199"])){
    for(let host=1;host<=254;host++){
      out.push(`${prefix}.${host}`);
      if(out.length>=limit)return out;
@@ -317,7 +331,9 @@ function h2ConnectionPairs(target,build){
  let endpoints=[];
 
  if($("h2ExtendedPool")?.checked){
-   endpoints=uniq([...sourceH2,...h2Ipv4Endpoints(508),...extraEndpointList()]);
+   const priority=uniq([...sourceH2,...h2PriorityEndpoints()]);
+   const rest=h2Ipv4Endpoints(508).filter(ep=>!priority.includes(ep));
+   endpoints=uniq([...priority,...stableShuffle(rest),...extraEndpointList()]);
  }else{
    endpoints=uniq([...sourceH2,...extraEndpointList()]);
  }
@@ -402,7 +418,7 @@ function opts(){
    $("freeHK").checked?"HK":"",$("freeTW").checked?"TW":"",$("freeKR").checked?"KR":""
  ].filter(Boolean);
  return {
-  sni:selectedSni(),dns:selectedDns(),mtu:selectedMtu(),network:$("networkMode").value,
+  sni:selectedSni(),sniList:parseSniList(),dns:selectedDns(),mtu:selectedMtu(),network:$("networkMode").value,
   stack:$("stackMode").value,cc:$("ccMode").value,outerCc:$("outerCc").value,bbrProfile:$("bbrProfile").value,
   handshake:Number($("handshakeTimeout").value)||0,udp:$("udpForward").checked,remoteDns:$("remoteDns").checked,
   autoSelect:$("autoSelect").checked,icons:$("showIcons").checked,adBlock:$("adBlock").checked,
@@ -422,10 +438,13 @@ function opts(){
   freeUseWarp:$("freeUseWarp").checked,
   freeScope:$("freeScope").value,
   freeProtocolMode:$("freeProtocolMode").value,
+  freeMultiSource:$("freeMultiSource")?.checked??true,
+  freeCustomSources:parseFreeCustomSources(),
   freeCountries:uniq([...baseFreeCountries,...($("customIpRoutingEnabled")?.checked?customParsed.countries:[])]),
   customIpEnabled:$("customIpRoutingEnabled")?.checked||false,
   customIpRules:customParsed.rules,
   customIpErrors:customParsed.errors,
+  chain:parseChainProxy(),
   profile:$("profileName").value.trim()||"MASQUE-Pro"
  };
 }
@@ -510,7 +529,7 @@ function updateEstimate(){
    `预计生成：${actual} 个节点${shortage} · ${$("networkMode").selectedOptions[0].textContent} · ${$("ruleMode").selectedOptions[0].textContent}`;
 }
 
-function makeNode(a,name,server,port,o){
+function makeNode(a,name,server,port,o,idx=0){
  const ips=innerIps();
  const udp=o.network==="h3-l4proxy"?false:o.udp;
  a.push(
@@ -519,7 +538,8 @@ function makeNode(a,name,server,port,o){
  );
  if(ips.v4)a.push(`    ip: ${q(ips.v4)}`);
  if(ips.v6)a.push(`    ipv6: ${q(ips.v6)}`);
- a.push(`    mtu: ${o.mtu}`,`    udp: ${bool(udp)}`,`    sni: ${q(o.sni)}`);
+ const nodeSni=(o.sniList&&o.sniList.length>1)?o.sniList[idx%o.sniList.length]:o.sni;
+ a.push(`    mtu: ${o.mtu}`,`    udp: ${bool(udp)}`,`    sni: ${q(nodeSni)}`);
  if(o.network!=="quic")a.push(`    network: ${o.network}`);
  a.push("    ip-stack:",`      mode: ${o.stack}`,`      congestion-controller: ${o.cc}`);
  if(o.remoteDns){
@@ -565,8 +585,60 @@ function freeProviderId(code,kind="general"){return `FREE-${code}-${kind.toUpper
 function freeProviderUrl(code){
  return `https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/by-country/clash-${code}.yaml`;
 }
+// 多源合并：主源 Au1rxx（按国家）之外，再并入 4 个公共链接源（无国家归属）。
+// 与主源一样走 mihomo proxy-provider：客户端分别拉取、在同一批 url-test 组里
+// 一起测活竞速。这些源是 vless/vmess/trojan/ss 等链接列表，mihomo 可直接解析。
+const FREE_MIX_SOURCES=[
+ {key:"ermaozi",label:"ermaozi",url:"https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt"},
+ {key:"cbusifab",label:"cbusifabcap",url:"https://raw.githubusercontent.com/cbusifabcap/daily_free_vpn/main/Z.txt"},
+ {key:"leilao",label:"LeilaoMi真测",url:"https://raw.githubusercontent.com/LeilaoMi/AutoMergePublicNodes-Optimized/main/output/global.urls"},
+ {key:"aliilapro",label:"ALIILAPRO",url:"https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt"}
+];
+function mixProviderId(srcKey,kind="general",prefix="FREE-MIX"){return `${prefix}-${srcKey.toUpperCase()}-${kind.toUpperCase()}`}
+function appendOneMixProvider(a,o,src,kind,prefix="FREE-MIX",seg="free-mix",icon="🌐"){
+ const hc=providerHealth(kind);
+ const pid=mixProviderId(src.key,kind,prefix);
+ a.push(
+   `  ${pid}:`,
+   "    type: http",
+   `    url: ${q(src.url)}`,
+   `    path: ${q(`./providers/${seg}-${src.key}-${kind}.yaml`)}`,
+   "    interval: 3600",
+   "    size-limit: 8388608"
+ );
+ if(o.freeUseWarp)a.push('    proxy: "WARP中转"');
+ if(o.freeProtocolMode==="stable"){
+   a.push('    exclude-type: "hysteria2|tuic|wireguard|http|https|socks4|socks5"');
+ }
+ a.push(
+   "    health-check:",
+   "      enable: true",
+   `      url: ${q(hc.url)}`,
+   `      expected-status: ${q(hc.expected)}`,
+   `      interval: ${hc.interval}`,
+   `      timeout: ${hc.timeout}`,
+   "      lazy: true",
+   "    override:",
+   `      additional-prefix: ${q(`${icon} ${src.label} | `)}`
+ );
+ if(o.freeUseWarp)a.push('      dialer-proxy: "WARP中转"');
+}
+// 自定义源：面板里每行一个 http(s) 订阅地址（Clash YAML 或链接列表均可），
+// 去重、去空行、最多 10 个；与内置多源走同一套 provider 生成逻辑。
+function parseFreeCustomSources(){
+ const raw=$("freeCustomSources")?.value||"";
+ const seen=new Set(),out=[];
+ for(const line of String(raw).split(/\r?\n/)){
+   const url=line.trim();
+   if(!/^https?:\/\/\S+$/i.test(url)||seen.has(url))continue;
+   seen.add(url);
+   out.push({key:String(out.length+1),label:`自定义${out.length+1}`,url});
+   if(out.length>=10)break;
+ }
+ return out;
+}
 function freeForService(o,name){
- if(!o.freeEnabled||!o.freeCountries.length)return false;
+ if(!o.freeEnabled||(!o.freeCountries.length&&!(o.freeCustomSources||[]).length))return false;
  const s=o.freeScope||"ai-streaming";
  if(s==="all-foreign")return name!=="Bilibili";
  if(s==="ai-only")return name==="AI";
@@ -582,20 +654,20 @@ function providerHealth(kind){
  if(kind==="ai")return {
    url:"https://chatgpt.com/",
    expected:"200-399",
-   interval:120,
-   timeout:9000
+   interval:300,
+   timeout:5000
  };
  if(kind==="stream")return {
    url:"https://www.netflix.com/",
    expected:"200-399",
-   interval:120,
-   timeout:9000
+   interval:300,
+   timeout:5000
  };
  return {
    url:"https://www.gstatic.com/generate_204",
    expected:"204",
-   interval:120,
-   timeout:5000
+   interval:300,
+   timeout:3000
  };
 }
 function appendOneFreeProvider(a,o,code,kind){
@@ -621,7 +693,7 @@ function appendOneFreeProvider(a,o,code,kind){
    `      expected-status: ${q(hc.expected)}`,
    `      interval: ${hc.interval}`,
    `      timeout: ${hc.timeout}`,
-   "      lazy: false",
+   "      lazy: true",
    "    override:",
    `      additional-prefix: ${q(`${meta.flag} ${code} | `)}`
  );
@@ -629,7 +701,7 @@ function appendOneFreeProvider(a,o,code,kind){
 }
 function appendFreeProviders(a,o){
  if(!o.freeEnabled)return;
- if(!o.freeCountries.length)throw new Error("已启用免费落地，但没有选择任何国家/地区");
+ if(!o.freeCountries.length&&!(o.freeCustomSources||[]).length)throw new Error("已启用免费落地，但没有选择任何国家/地区，也没有填写自定义源");
  a.push("","proxy-providers:");
  for(const code of o.freeCountries){
    // Same source, three independent health gates:
@@ -638,9 +710,23 @@ function appendFreeProviders(a,o){
    appendOneFreeProvider(a,o,code,"ai");
    appendOneFreeProvider(a,o,code,"stream");
  }
+ if(o.freeMultiSource){
+   for(const src of FREE_MIX_SOURCES){
+     appendOneMixProvider(a,o,src,"general");
+     appendOneMixProvider(a,o,src,"ai");
+     appendOneMixProvider(a,o,src,"stream");
+   }
+ }
+ for(const src of o.freeCustomSources||[]){
+   appendOneMixProvider(a,o,src,"general","FREE-CUSTOM","free-custom","🧩");
+   appendOneMixProvider(a,o,src,"ai","FREE-CUSTOM","free-custom","🧩");
+   appendOneMixProvider(a,o,src,"stream","FREE-CUSTOM","free-custom","🧩");
+ }
 }
 function appendProviderUse(a,o,kind="general",indent="      "){
  for(const code of o.freeCountries)a.push(`${indent}- ${q(freeProviderId(code,kind))}`);
+ if(o.freeMultiSource)for(const src of FREE_MIX_SOURCES)a.push(`${indent}- ${q(mixProviderId(src.key,kind))}`);
+ for(const src of o.freeCustomSources||[])a.push(`${indent}- ${q(mixProviderId(src.key,kind,"FREE-CUSTOM"))}`);
 }
 
 function countryRuleName(code){
@@ -676,19 +762,43 @@ function appendCustomIpRules(a,o){
  a.push("");
 }
 
+function buildEndpointSubgroups(names){
+ if(!currentPairServers.length||currentPairServers.length!==names.length)return {groups:[],singles:names};
+ const byEp=new Map();
+ names.forEach((n,i)=>{const ep=currentPairServers[i];if(!byEp.has(ep))byEp.set(ep,[]);byEp.get(ep).push(n);});
+ const groups=[],singles=[];
+ for(const [ep,members] of byEp){
+  if(members.length>1)groups.push({name:`EP ${ep}`,members});
+  else singles.push(members[0]);
+ }
+ if(!groups.length)return {groups:[],singles:names};
+ return {groups,singles};
+}
 function clashGroupsAndRules(names,o){
  const a=["","proxy-groups:"];
- const freeOn=o.freeEnabled&&o.freeCountries.length>0;
+ const freeOn=o.freeEnabled&&(o.freeCountries.length>0||(o.freeCustomSources||[]).length>0);
 
+ const epSub=buildEndpointSubgroups(names);
+ for(const g of epSub.groups){
+  a.push(`  - name: ${q(g.name)}`,"    type: url-test","    hidden: true",
+   `    url: ${q(o.healthUrl)}`,`    interval: ${Number(o.healthInterval)||300}`,`    tolerance: ${Number(o.tolerance)||50}`,
+   "    timeout: 3000","    lazy: true","    max-failed-times: 2","    proxies:");
+  appendRawNodes(a,g.members);
+ }
  groupHeader(a,"🚀 WARP自动","url-test");
  a.push(
    "    hidden: true",
    `    url: ${q(o.healthUrl)}`,
-   `    interval: ${Math.min(Number(o.healthInterval)||300,180)}`,
-   `    tolerance: ${Math.min(Number(o.tolerance)||30,40)}`,
-   "    timeout: 5000","    lazy: false","    max-failed-times: 2","    proxies:"
+   `    interval: ${Number(o.healthInterval)||300}`,
+   `    tolerance: ${Number(o.tolerance)||50}`,
+   "    timeout: 3000","    lazy: true","    max-failed-times: 2","    proxies:"
  );
- appendRawNodes(a,names);
+ if(epSub.groups.length){
+  for(const g of epSub.groups)a.push(`      - ${q(g.name)}`);
+  appendRawNodes(a,epSub.singles);
+ }else{
+  appendRawNodes(a,names);
+ }
 
  groupHeader(a,"🌎 WARP可手动");
  a.push("    proxies:",'      - "🚀 WARP自动"');
@@ -701,21 +811,21 @@ function clashGroupsAndRules(names,o){
    groupHeader(a,"⚡ 免费落地自动","url-test");
    a.push(
      "    hidden: true","    url: https://www.gstatic.com/generate_204","    expected-status: 204",
-     "    interval: 120","    tolerance: 30","    timeout: 5000","    lazy: false","    max-failed-times: 2","    use:"
+     "    interval: 300","    tolerance: 50","    timeout: 3000","    lazy: true","    max-failed-times: 2","    use:"
    );
    appendProviderUse(a,o,"general");
 
    groupHeader(a,"🤖 AI自动优选","url-test");
    a.push(
      "    hidden: true","    url: https://chatgpt.com/","    expected-status: 200-399",
-     "    interval: 120","    tolerance: 30","    timeout: 9000","    lazy: false","    max-failed-times: 2","    use:"
+     "    interval: 300","    tolerance: 50","    timeout: 5000","    lazy: true","    max-failed-times: 2","    use:"
    );
    appendProviderUse(a,o,"ai");
 
    groupHeader(a,"🎬 流媒体自动优选","url-test");
    a.push(
      "    hidden: true","    url: https://www.netflix.com/","    expected-status: 200-399",
-     "    interval: 120","    tolerance: 30","    timeout: 9000","    lazy: false","    max-failed-times: 2","    use:"
+     "    interval: 300","    tolerance: 50","    timeout: 5000","    lazy: true","    max-failed-times: 2","    use:"
    );
    appendProviderUse(a,o,"stream");
 
@@ -729,7 +839,7 @@ function clashGroupsAndRules(names,o){
      a.push(
        "    hidden: true",
        "    url: https://www.gstatic.com/generate_204","    expected-status: 204",
-       "    interval: 120","    tolerance: 20","    timeout: 5000","    lazy: false","    max-failed-times: 2",
+       "    interval: 300","    tolerance: 50","    timeout: 3000","    lazy: true","    max-failed-times: 2",
        "    use:",`      - ${q(freeProviderId(code,"general"))}`
      );
    }
@@ -739,7 +849,7 @@ function clashGroupsAndRules(names,o){
  groupHeader(a,"♻️ 自动选择","url-test");
  a.push(
    "    url: https://www.gstatic.com/generate_204","    expected-status: 204",
-   "    interval: 120","    tolerance: 20","    timeout: 5000","    lazy: false","    max-failed-times: 2","    proxies:"
+   `    interval: ${Number(o.healthInterval)||300}`,`    tolerance: ${Number(o.tolerance)||50}`,"    timeout: 3000","    lazy: true","    max-failed-times: 2","    proxies:"
  );
  if(freeOn)appendCountryChoices(a,o);
  a.push('      - "🚀 WARP自动"');
@@ -747,7 +857,7 @@ function clashGroupsAndRules(names,o){
  groupHeader(a,"🛡️ 故障转移","fallback");
  a.push(
    "    url: https://www.gstatic.com/generate_204","    expected-status: 204",
-   "    interval: 60","    timeout: 5000","    lazy: false","    max-failed-times: 1","    proxies:"
+   "    interval: 60","    timeout: 3000","    lazy: true","    max-failed-times: 1","    proxies:"
  );
  if(freeOn)appendCountryChoices(a,o);
  a.push('      - "🚀 WARP自动"');
@@ -755,7 +865,7 @@ function clashGroupsAndRules(names,o){
  groupHeader(a,"⚖️ 负载均衡","load-balance");
  a.push(
    "    strategy: consistent-hashing",
-   "    url: https://www.gstatic.com/generate_204","    interval: 180","    timeout: 5000","    lazy: false"
+   "    url: https://www.gstatic.com/generate_204","    interval: 300","    timeout: 3000","    lazy: true"
  );
  if(freeOn){
    a.push("    use:");
@@ -768,6 +878,7 @@ function clashGroupsAndRules(names,o){
  a.push("    proxies:",'      - "♻️ 自动选择"','      - "🛡️ 故障转移"','      - "⚖️ 负载均衡"');
  if(freeOn)appendCountryChoices(a,o);
  if(freeOn)a.push('      - "🌍 免费落地可手动"');
+ if(o.chain)a.push('      - "⛓ 链式出口"');
  a.push('      - "🌎 WARP可手动"','      - "🚀 WARP自动"',"      - DIRECT");
 
  groupHeader(a,"🎯 全球直连");
@@ -798,7 +909,7 @@ function clashGroupsAndRules(names,o){
  groupHeader(a,"⚡ YouTube-WARP极速","url-test");
  a.push(
    "    hidden: true","    url: https://www.gstatic.com/generate_204","    expected-status: 204",
-   "    interval: 60","    tolerance: 10","    timeout: 4000","    lazy: false","    max-failed-times: 1","    proxies:"
+   "    interval: 60","    tolerance: 10","    timeout: 3000","    lazy: true","    max-failed-times: 1","    proxies:"
  );
  appendRawNodes(a,names);
 
@@ -806,7 +917,7 @@ function clashGroupsAndRules(names,o){
    groupHeader(a,"⚡ YouTube-免费极速","url-test");
    a.push(
      "    hidden: true","    url: https://www.gstatic.com/generate_204","    expected-status: 204",
-     "    interval: 60","    tolerance: 10","    timeout: 5000","    lazy: false","    max-failed-times: 1","    use:"
+     "    interval: 60","    tolerance: 10","    timeout: 3000","    lazy: true","    max-failed-times: 1","    use:"
    );
    appendProviderUse(a,o,"general");
  }
@@ -962,7 +1073,7 @@ function buildClash(){
    throw new Error("自定义 IP 规则使用了地区/免费出口，但免费落地节点已关闭。请启用免费落地，或把目标改成 WARP / DIRECT。");
  }
  const a=[
-  `# ${o.profile} - Clash / Mihomo MASQUE v6.17 Dynamic-Country-Rules`,
+  `# ${o.profile} - Clash / Mihomo MASQUE v6.21 QR-Subscription`,
   "mixed-port: 7890","allow-lan: false","mode: rule","log-level: info","ipv6: true","unified-delay: true","tcp-concurrent: true","keep-alive-interval: 15","keep-alive-idle: 15"
  ];
  if(o.enableControllerApi){
@@ -976,7 +1087,14 @@ function buildClash(){
   "  nameserver:","    - https://doh.pub/dns-query","    - https://dns.alidns.com/dns-query",
   "","proxies:"
  );
- pairs.forEach(([server,port],i)=>{const n=nodeName(server,port,i);names.push(n);makeNode(a,n,server,port,o)});
+ currentPairServers=pairs.map(p=>String(p[0]));
+ pairs.forEach(([server,port],i)=>{const n=nodeName(server,port,i);names.push(n);makeNode(a,n,server,port,o,i)});
+ if(o.chain){
+  a.push(`  - name: "⛓ 链式出口"`,`    type: ${o.chain.type}`,`    server: ${q(o.chain.host)}`,`    port: ${o.chain.port}`);
+  if(o.chain.user)a.push(`    username: ${q(o.chain.user)}`);
+  if(o.chain.pass)a.push(`    password: ${q(o.chain.pass)}`);
+  a.push('    dialer-proxy: "WARP中转"');
+ }
  appendFreeProviders(a,o);
  a.push(...clashGroupsAndRules(names,o));
  return a.join("\n");
@@ -988,7 +1106,8 @@ function buildShadowrocket(){
  const o=opts(),pairs=connectionPairs(),names=[];
  const a=[`# ${o.profile} - Shadowrocket 2.2.90+ MASQUE (Clash-compatible YAML)`,
  "mixed-port: 7890","mode: rule","ipv6: true","","proxies:"];
- pairs.forEach(([server,port],i)=>{const n=nodeName(server,port,i);names.push(n);makeNode(a,n,server,port,o)});
+ currentPairServers=pairs.map(p=>String(p[0]));
+ pairs.forEach(([server,port],i)=>{const n=nodeName(server,port,i);names.push(n);makeNode(a,n,server,port,o,i)});
  a.push("","proxy-groups:",'  - name: "PROXY"',"    type: select","    proxies:");
  names.forEach(n=>a.push(`      - ${q(n)}`));a.push("      - DIRECT","","rules:","  - GEOIP,CN,DIRECT","  - MATCH,PROXY","");
  return a.join("\n");
@@ -1076,7 +1195,7 @@ pause
 
 function setFormat(fmt){
  if(!source)return;
- currentFormat=fmt;helperText="";
+ currentFormat=fmt;helperText="";resetSubQr();updateSubNativeWarn();
  document.querySelectorAll(".format-card").forEach(x=>x.classList.remove("active"));
  ({native:"fmtNative",clash:"fmtClash",shadowrocket:"fmtShadowrocket",singbox:"fmtSingbox",vless:"fmtVless"}[fmt]&&$(({native:"fmtNative",clash:"fmtClash",shadowrocket:"fmtShadowrocket",singbox:"fmtSingbox",vless:"fmtVless"})[fmt]).classList.add("active"));
  $("downloadHelper").className="hidden";$("downloadVlessBat").className="hidden";$("runGuide").className="run-guide hidden";hideNotice();
@@ -1118,7 +1237,7 @@ function loadSource(text,label){
  $("regSummary").classList.remove("hidden");$("regSummary").textContent=`已加载：${label}\nendpoint_v4: ${source.endpoint_v4||"(无)"}\nendpoint_v6: ${source.endpoint_v6||"(无)"}\nipv4: ${source.ipv4||"(无)"}\nipv6: ${source.ipv6||"(无)"}`;
  setStatus("原生 config.json 已加载，可以直接自定义和转换。","ok");
  settingsDirty=false;setSettingsState("clean","原生配置加载成功，当前设置已应用");
- toast(`已加载 ${label}，无需重新注册。`,"success","原生配置加载成功");
+ toast(`已加载 ${label}，无需重新注册。`,"success","原生配置加载成功");wizSet(1);
 }
 
 async function register(){
@@ -1193,17 +1312,17 @@ function updateChatgptRouteHint(){
 }
 
 function resetRecommended(){
- $("endpointPreset").value="auto-curated";$("portPreset").value="recommended";$("sniPreset").value="www.microsoft.com";$("dnsPreset").value="cf-google-dual";
+ $("endpointPreset").value="auto-curated";$("portPreset").value="recommended";$("sniPreset").value="speed.cloudflare.com";$("dnsPreset").value="cf-google-dual";
  $("innerIpMode").value="dual";$("networkMode").value="quic";$("stackMode").value="auto";$("ccMode").value="cubic";$("outerCc").value="";$("bbrProfile").value="standard";
- $("mtuPreset").value="1280";$("handshakeTimeout").value="0";$("ruleMode").value="smart";$("healthUrl").value="http://cp.cloudflare.com/generate_204";
- $("healthInterval").value="300";$("healthTolerance").value="30";$("aiHealthMode").value="chatgpt";
+ $("mtuPreset").value="1280";$("handshakeTimeout").value="5";$("ruleMode").value="smart";$("healthUrl").value="http://cp.cloudflare.com/generate_204";
+ $("healthInterval").value="300";$("healthTolerance").value="50";$("aiHealthMode").value="chatgpt";
  $("chatgptRouteMode").value="DIRECT";$("otherAiRouteMode").value="AI";$("chatgptDirectFallback").checked=true;
  $("egressCountry1").value="";$("egressCountry2").value="";$("egressCountry3").value="";
  $("controllerUrl").value="http://127.0.0.1:9090";$("controllerSecret").value="";$("localProxyUrl").value="http://127.0.0.1:7890";
  $("egressChatgptFirst").checked=true;$("egressApplyAll").checked=false;$("enableControllerApi").checked=true;
- $("nodeTag").value="CDN";$("profileName").value="MASQUE-Pro";$("nodeCountMode").value="13";$("customNodeCount").value="100";$("nodeBuildMode").value="balanced";$("extraEndpoints").value="";$("nodeNaming").value="detail";
+ $("nodeTag").value="CDN";$("profileName").value="MASQUE-Pro";$("nodeCountMode").value="48";$("customNodeCount").value="100";$("nodeBuildMode").value="balanced";$("extraEndpoints").value="";$("nodeNaming").value="detail";
  $("udpForward").checked=true;$("remoteDns").checked=true;$("autoSelect").checked=true;$("showIcons").checked=true;$("adBlock").checked=true;$("includeTestEndpoints").checked=true;$("dedupeNodes").checked=true;$("h2ExtendedPool").checked=true;
- $("freeEgressEnabled").checked=true;$("freeUseWarp").checked=true;$("freeScope").value="ai-streaming";$("freeProtocolMode").value="stable";
+ $("freeEgressEnabled").checked=true;$("freeUseWarp").checked=true;$("freeScope").value="ai-streaming";$("freeProtocolMode").value="stable";$("freeMultiSource").checked=true;$("freeCustomSources").value="";
  $("freeUS").checked=true;$("freeJP").checked=true;$("freeSG").checked=true;$("freeHK").checked=false;$("freeTW").checked=false;$("freeKR").checked=false;
  $("customIpRoutingEnabled").checked=false;$("customIpRoutingRules").value="";
  syncConditional();updateEstimate();updateFreeEgressHint();updateCustomIpRoutingHint();
@@ -1232,7 +1351,7 @@ function syncConditional(){
  if($("networkMode").value==="h3-l4proxy")$("udpForward").checked=false;
 }
 
-const selectSettingIds=["freeEgressEnabled","freeUseWarp","freeScope","freeProtocolMode","freeUS","freeJP","freeSG","freeHK","freeTW","freeKR","customIpRoutingEnabled","endpointPreset","portPreset","sniPreset","dnsPreset","innerIpMode","networkMode","stackMode","ccMode","outerCc","bbrProfile","mtuPreset","handshakeTimeout","ruleMode","healthUrl","healthInterval","healthTolerance","aiHealthMode","chatgptRouteMode","otherAiRouteMode","chatgptDirectFallback","egressCountry1","egressCountry2","egressCountry3","egressChatgptFirst","egressApplyAll","enableControllerApi","nodeCountMode","nodeBuildMode","nodeNaming","udpForward","remoteDns","autoSelect","showIcons","adBlock","includeTestEndpoints","dedupeNodes","h2ExtendedPool"];
+const selectSettingIds=["freeEgressEnabled","freeUseWarp","freeScope","freeProtocolMode","freeMultiSource","freeUS","freeJP","freeSG","freeHK","freeTW","freeKR","customIpRoutingEnabled","endpointPreset","portPreset","sniPreset","dnsPreset","innerIpMode","networkMode","stackMode","ccMode","outerCc","bbrProfile","mtuPreset","handshakeTimeout","ruleMode","healthUrl","healthInterval","healthTolerance","aiHealthMode","chatgptRouteMode","otherAiRouteMode","chatgptDirectFallback","egressCountry1","egressCountry2","egressCountry3","egressChatgptFirst","egressApplyAll","enableControllerApi","nodeCountMode","nodeBuildMode","nodeNaming","udpForward","remoteDns","autoSelect","showIcons","adBlock","includeTestEndpoints","dedupeNodes","h2ExtendedPool"];
 selectSettingIds.forEach(id=>$(id).addEventListener("change",()=>{
  syncConditional();updateEstimate();
  if(id==="chatgptRouteMode"||id==="otherAiRouteMode")updateChatgptRouteHint();
@@ -1248,7 +1367,7 @@ selectSettingIds.forEach(id=>$(id).addEventListener("change",()=>{
    }
  }
 }));
-const textSettingIds=["customIpRoutingRules","customEndpoint","customPort","customSni","customDns","customInner4","customInner6","customMtu","customNodeCount","extraEndpoints","controllerUrl","controllerSecret","localProxyUrl","nodeTag","profileName"];
+const textSettingIds=["freeCustomSources","customIpRoutingRules","customEndpoint","customPort","customSni","customDns","customInner4","customInner6","customMtu","customNodeCount","extraEndpoints","controllerUrl","controllerSecret","localProxyUrl","nodeTag","profileName"];
 textSettingIds.forEach(id=>$(id).addEventListener("change",()=>{
  if(id==="customIpRoutingRules")updateCustomIpRoutingHint();
  updateEstimate();
@@ -1297,6 +1416,379 @@ $("fmtClash").addEventListener("click",()=>{try{setFormat("clash");toast(`Clash 
 $("fmtShadowrocket").addEventListener("click",()=>{try{setFormat("shadowrocket");toast(`Shadowrocket 配置已生成，共 ${connectionPairs().length} 个节点。`,"success","格式已生成")}catch(e){toast(e.message,"error","生成失败")}});
 $("fmtSingbox").addEventListener("click",()=>{try{setFormat("singbox");toast("sing-box 兼容配置已生成。","success","格式已生成")}catch(e){toast(e.message,"error","生成失败")}});
 $("fmtVless").addEventListener("click",()=>{try{setFormat("vless");toast("VLESS 本地桥接配置已生成。","success","格式已生成")}catch(e){toast(e.message,"error","生成失败")}});
+const PANEL_VERSION="6.27";
+function versionNewer(a,b){
+ const pa=String(a).replace(/^v/i,"").split(".").map(n=>parseInt(n,10)||0);
+ const pb=String(b).replace(/^v/i,"").split(".").map(n=>parseInt(n,10)||0);
+ for(let i=0;i<Math.max(pa.length,pb.length);i++){const x=pa[i]||0,y=pb[i]||0;if(x>y)return true;if(x<y)return false;}
+ return false;
+}
+async function checkPanelUpdate(){
+ try{
+  const res=await fetch("https://api.github.com/repos/KJGX66F/usque-custom-pro/releases/latest",{headers:{Accept:"application/vnd.github+json"}});
+  if(!res.ok)return;
+  const d=await res.json();
+  const tag=String(d.tag_name||"");
+  if(!tag||!versionNewer(tag,PANEL_VERSION))return;
+  let dismissed="";try{dismissed=localStorage.getItem("usque.dismissedRelease")||"";}catch{}
+  if(dismissed===tag)return;
+  const banner=$("updateBanner");if(!banner)return;
+  $("updateBannerText").textContent=`🎉 面板有新版本 ${tag}（你正在用 v${PANEL_VERSION}），建议更新：`;
+  $("updateBannerLink").href=d.html_url||"https://github.com/KJGX66F/usque-custom-pro/releases";
+  banner.dataset.tag=tag;
+  banner.classList.remove("hidden");
+ }catch{}
+}
+$("updateBannerClose")?.addEventListener("click",()=>{
+ const banner=$("updateBanner");
+ try{localStorage.setItem("usque.dismissedRelease",banner?.dataset.tag||"");}catch{}
+ banner?.classList.add("hidden");
+});
+function wizSet(n){
+ const el=$("wizStep"+n);if(!el)return;
+ const check=el.querySelector(".wiz-check");if(check)check.textContent="✅ ";
+ el.classList.add("done");
+}
+const DEMO_CONFIG={
+ private_key:"MHcCAQEEIBcBntFulK4fvQR9vcKpoogqU7XIvOHFrQTZH0WIjTZ3oAoGCCqGSM49AwEHoUQDQgAEqiw37D2TdNver68dvS6sHWpxcNvr3G5O3SF+UymdoRZhw0IVQ+PgXdXoXUoQs1gIP5Hz7r4aSIoWkzWdbp46AA==",
+ endpoint_pub_key:"-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqiw37D2TdNver68dvS6sHWpxcNvr\n3G5O3SF+UymdoRZhw0IVQ+PgXdXoXUoQs1gIP5Hz7r4aSIoWkzWdbp46AA==\n-----END PUBLIC KEY-----\n",
+ endpoint_v4:"162.159.198.2",endpoint_v6:"2606:4700:103::2",
+ endpoint_h2_v4:"162.159.198.2",endpoint_h2_v6:"2606:4700:103::2",
+ ipv4:"172.16.0.2",ipv6:"2606:4700:110:8a36::2",
+ id:"demo-account-not-real",access_token:"demo",license:"demo"
+};
+$("wizDemo")?.addEventListener("click",()=>{
+ try{
+  loadSource(JSON.stringify(DEMO_CONFIG,null,2),"演示模式（假数据，不能真连接）");
+  toast("已进入演示模式：所有生成效果都可体验，但这份假配置不能真的连接。要正式使用请注册或导入你自己的 config.json。","warning","演示模式");
+ }catch(e){toast("演示模式加载失败："+String((e&&e.message)||e),"error","演示模式");}
+});
+["fmtNative","fmtClash","fmtShadowrocket","fmtSingbox","fmtVless"].forEach(id=>$(id)?.addEventListener("click",()=>wizSet(2)));
+["downloadMain","copyMain"].forEach(id=>$(id)?.addEventListener("click",()=>wizSet(3)));
+function parseSniList(){
+ if(!$("sniRotate")?.checked)return [];
+ const list=uniq(($("sniCandidates")?.value||"").split(/[,\s，]+/).map(s=>s.trim()).filter(s=>/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s)));
+ return list.length>1?list:[];
+}
+$("sniRotate")?.addEventListener("change",e=>{
+ $("sniCandidatesWrap")?.classList.toggle("hidden",!e.target.checked);
+});
+function buildDiagnostics(){
+ const o=(()=>{try{return opts();}catch{return null;}})();
+ const lines=[];
+ const push=(k,v)=>lines.push(`${k}: ${v}`);
+ push("工具","Usque MASQUE Pro 面板（诊断信息，已脱敏）");
+ push("面板版本","v"+PANEL_VERSION);
+ push("导出时间",new Date().toLocaleString());
+ push("浏览器",navigator.userAgent);
+ push("当前格式",currentFormat);
+ push("端点池",($("poolStatus")?.textContent||"").trim()||"(未知)");
+ push("账户已加载",source?"是":"否");
+ if(source){
+  push("endpoint_v4",source.endpoint_v4||"(无)");
+  push("endpoint_v6",source.endpoint_v6||"(无)");
+  push("隧道 IPv4",source.ipv4?"有":"无");
+  push("隧道 IPv6",source.ipv6?"有":"无");
+  push("账户 ID",source.id?String(source.id).slice(0,6)+"…（已截断）":"(无)");
+ }
+ push("预计节点数",(()=>{try{return connectionPairs().length;}catch{return "(未知)";}})());
+ push("账户库数量",loadAccounts().length);
+ push("常驻订阅",loadPermSub()?"有（令牌已隐藏）":"无");
+ if(o){
+  push("链式出口",o.chain?"已启用":"未启用");
+  push("SNI",o.sniList&&o.sniList.length?`候选池轮换（${o.sniList.length} 个）`:o.sni);
+  push("免费落地",o.freeEnabled?`开（国家：${o.freeCountries.join("/")||"无"}，多源合并：${o.freeMultiSource?"开":"关"}，自定义源：${(o.freeCustomSources||[]).length} 个）`:"关");
+ }
+ lines.push("","说明：本文件只包含排查问题需要的非敏感信息，不含私钥、access_token、license、订阅令牌，可以放心发送。");
+ return lines.join("\n");
+}
+$("exportDiagnostics")?.addEventListener("click",()=>{
+ download("usque-diagnostics.txt",buildDiagnostics(),"text/plain");
+});
+
+async function subApiGet(path,retry=true){
+ const headers={};const ownerKey=loadSubOwnerKey();
+ if(ownerKey)headers["X-Sub-Owner"]=ownerKey;
+ const res=await fetch(path,{method:"GET",headers});
+ const data=await res.json().catch(()=>({}));
+ if(res.status===403&&data.code==="owner_required"){
+  if(retry){
+   const entered=prompt("此操作仅部署者可用。请输入部署者口令（部署者在 Cloudflare 里设置的 SUB_OWNER_KEY；只保存在你这台浏览器里）：");
+   if(entered&&entered.trim()){saveSubOwnerKey(entered.trim());return subApiGet(path,false);}
+   throw new Error("已取消输入部署者口令。");
+  }
+  saveSubOwnerKey(null);
+  throw new Error(data.message||"部署者口令不正确。");
+ }
+ if(!res.ok)throw new Error(data.message||`操作失败（HTTP ${res.status}）`);
+ return data;
+}
+function renderSubImportLinks(url){
+ const row=$("subImportRow");if(!row)return;
+ const name=encodeURIComponent("MASQUE-Pro 订阅");
+ const b64=btoa(url);
+ const set=(id,href,show)=>{const el=$(id);if(!el)return;el.classList.toggle("hidden",!show);if(show)el.href=href;};
+ set("importClash",`clash://install-config?url=${encodeURIComponent(url)}#${name}`,currentFormat==="clash");
+ set("importShadowrocket",`sub://${b64}`,currentFormat==="clash"||currentFormat==="shadowrocket");
+ set("importSingbox",`sing-box://import-remote-profile?url=${encodeURIComponent(url)}#${name}`,currentFormat==="singbox");
+ set("importV2rayNG",`v2rayng://install-sub/?url=${encodeURIComponent(b64)}`,currentFormat==="clash");
+ row.classList.toggle("hidden",!(currentFormat==="clash"||currentFormat==="shadowrocket"||currentFormat==="singbox"));
+}
+function restoreMsg(t,err){const m=$("permRestoreMsg");if(!m)return;m.textContent=t;m.style.color=err?"#ff9c9c":"";m.classList.remove("hidden");}
+$("permRestoreBtn")?.addEventListener("click",async()=>{
+ const raw=($("permRestoreInput")?.value||"").trim();
+ const m=raw.match(/[a-f0-9]{48}/);
+ if(!m){restoreMsg("没识别出令牌：请粘贴完整的常驻订阅链接（…/sub/ 后面是 48 位令牌）。",true);return;}
+ const token=m[0];
+ try{
+  const res=await fetch(permSubUrl(token),{method:"GET"});
+  if(res.status===404){restoreMsg("这条链接在服务器上不存在，或已过期 / 已被吊销。",true);return;}
+  if(!res.ok){restoreMsg(`校验失败（HTTP ${res.status}）。`,true);return;}
+  if(res.headers.get("profile-update-interval")!=="24"){restoreMsg("这条链接不是常驻订阅（可能是 24 小时 / 7 天链接），不能恢复管理。",true);return;}
+ }catch(e){restoreMsg("校验请求失败："+String((e&&e.message)||e),true);return;}
+ savePermSub({token,format:"clash"});
+ renderPermSubBox();
+ restoreMsg("已恢复管理：下方「我的常驻订阅」里可以更新、轮换、删除这条链接了。");
+});
+async function refreshSubList(){
+ const box=$("subListBox"),hint=$("subListHint");
+ if(!box||!hint)return;
+ try{
+  const data=await subApiGet("/api/sub/list");
+  const subs=data.subscriptions||[];
+  hint.textContent=`共 ${subs.length} 条${data.truncated?"（只显示前 200 条）":""}`;
+  box.innerHTML="";
+  if(!subs.length)box.innerHTML="<p class='sub-list-empty'>还没有任何已发订阅。</p>";
+  for(const s of subs){
+   const row=document.createElement("div");row.className="sub-list-row";
+   const tierLabel=s.tier==="perm"?"常驻":s.tier==="7d"?"7 天":"24 小时";
+   const exp=s.tier==="perm"?"长期有效":("到期："+new Date(s.expiresAt).toLocaleString());
+   const info=document.createElement("span");
+   info.textContent=`${tierLabel} · ${s.filename||""} · ${exp} · …${String(s.token).slice(-6)}`;
+   const copy=document.createElement("button");copy.type="button";copy.textContent="复制链接";
+   copy.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(permSubUrl(s.token));copy.textContent="已复制";setTimeout(()=>{copy.textContent="复制链接";},1500);}catch{}});
+   const revoke=document.createElement("button");revoke.type="button";revoke.textContent="吊销";
+   revoke.addEventListener("click",async()=>{
+    if(!confirm("确定吊销这条订阅？吊销后链接立即失效。"))return;
+    try{
+     await subApi("/api/sub/revoke",{token:s.token});
+     if(loadPermSub()?.token===s.token){savePermSub(null);renderPermSubBox();}
+     refreshSubList();
+    }catch(e){hint.textContent=String((e&&e.message)||e);}
+   });
+   row.append(info,copy,revoke);box.appendChild(row);
+  }
+  box.classList.remove("hidden");
+ }catch(e){
+  hint.textContent=String((e&&e.message)||e);
+  box.classList.add("hidden");
+ }
+}
+$("subListBtn")?.addEventListener("click",refreshSubList);
+
+const ACCOUNTS_KEY="usque.accounts.v1";
+function loadAccounts(){try{const v=JSON.parse(localStorage.getItem(ACCOUNTS_KEY)||"[]");return Array.isArray(v)?v:[];}catch{return[];}}
+function saveAccounts(list){try{localStorage.setItem(ACCOUNTS_KEY,JSON.stringify(list));}catch{}}
+function accountLabel(a){const d=a.savedAt?new Date(a.savedAt).toLocaleString():"";return `${String(a.id||"账户").slice(0,10)}… · ${d}`;}
+function renderAccounts(){
+ const sel=$("accountSelect");if(!sel)return;
+ const list=loadAccounts();const cur=sel.value;
+ sel.innerHTML="";
+ if(!list.length){const op=document.createElement("option");op.value="";op.textContent="（暂无保存的账户）";sel.appendChild(op);return;}
+ list.forEach((a,i)=>{const op=document.createElement("option");op.value=String(i);op.textContent=accountLabel(a);sel.appendChild(op);});
+ if(cur&&list[Number(cur)])sel.value=cur;
+}
+function accountMsg(t,err){const m=$("accountMsg");if(!m)return;m.textContent=t;m.style.color=err?"#ff9c9c":"";m.classList.remove("hidden");}
+$("accountSave")?.addEventListener("click",()=>{
+ if(!source||!sourceText){accountMsg("先注册或导入一个 config.json，再存入账户库。",true);return;}
+ const list=loadAccounts().filter(a=>a.id!==source.id);
+ list.unshift({id:source.id||"",savedAt:new Date().toISOString(),text:sourceText});
+ const kept=list.slice(0,20);
+ saveAccounts(kept);renderAccounts();
+ accountMsg(`已存入账户库（共 ${kept.length} 个）。`);
+});
+$("accountSwitch")?.addEventListener("click",()=>{
+ const list=loadAccounts();const a=list[Number($("accountSelect")?.value)];
+ if(!a){accountMsg("先在列表里选一个账户。",true);return;}
+ try{loadSource(a.text,"账户库中的账户");accountMsg("已切换到所选账户。");}catch(e){accountMsg("切换失败："+String((e&&e.message)||e),true);}
+});
+$("accountDelete")?.addEventListener("click",()=>{
+ const list=loadAccounts();const i=Number($("accountSelect")?.value);
+ if(!list[i]){accountMsg("先在列表里选一个账户。",true);return;}
+ list.splice(i,1);saveAccounts(list);renderAccounts();accountMsg("已删除所选账户。");
+});
+
+function parseChainProxy(){
+ if(!$("chainEnabled")?.checked)return null;
+ const host=($("chainHost")?.value||"").trim();
+ const port=Number($("chainPort")?.value)||0;
+ if(!host||!port)return null;
+ return {type:$("chainType")?.value==="socks5"?"socks5":"http",host,port,user:($("chainUser")?.value||"").trim(),pass:$("chainPass")?.value||""};
+}
+function setPoolStatus(remote,updatedAt){
+ const el=$("poolStatus");if(!el)return;
+ el.textContent=remote?`端点池：远程清单${updatedAt?`（更新于 ${updatedAt}）`:""}，已覆盖内置池。`:"端点池：内置（远程清单读取失败或尚未发布，已自动回退）。";
+}
+async function loadRemotePool(){
+ const poolUrls=[
+  "https://raw.githubusercontent.com/KJGX66F/usque-custom-pro/main/endpoints.json",
+  "https://cdn.jsdelivr.net/gh/KJGX66F/usque-custom-pro@main/endpoints.json"
+ ];
+ for(const base of poolUrls){
+  try{
+   const res=await fetch(`${base}?t=${Date.now()}`,{cache:"no-store"});
+   if(!res.ok)continue;
+   const data=await res.json();
+   if(data&&data.endpoints)for(const k of Object.keys(ENDPOINTS))if(typeof data.endpoints[k]==="string"&&data.endpoints[k])ENDPOINTS[k]=data.endpoints[k];
+   if(data&&Array.isArray(data.curatedPairs)&&data.curatedPairs.length)remoteCuratedPairs=data.curatedPairs;
+   if(data&&Array.isArray(data.testPairs))remoteTestPairs=data.testPairs;
+   if(data&&Array.isArray(data.h2Prefixes)&&data.h2Prefixes.length)remoteH2Prefixes=data.h2Prefixes.map(String);
+   setPoolStatus(true,data&&data.updatedAt);
+   updateEstimate();
+   return;
+  }catch{}
+ }
+ setPoolStatus(false);
+}
+
+function resetSubQr(){
+ $("subQrPanel")?.classList.add("hidden");
+ $("subQrError")?.classList.add("hidden");
+}
+const PERM_SUB_KEY="usque.permSub.v1";
+function loadPermSub(){try{const v=JSON.parse(localStorage.getItem(PERM_SUB_KEY)||"null");return v&&/^[a-f0-9]{48}$/.test(v.token||"")?v:null;}catch{return null;}}
+function savePermSub(v){try{if(v)localStorage.setItem(PERM_SUB_KEY,JSON.stringify(v));else localStorage.removeItem(PERM_SUB_KEY);}catch{}}
+function permSubUrl(token){return `${location.origin}/sub/${token}`;}
+function renderPermSubBox(){
+ const box=$("permSubBox");if(!box)return;
+ const perm=loadPermSub();
+ if(!perm){box.classList.add("hidden");return;}
+ const link=$("permSubLink"),url=permSubUrl(perm.token);
+ link.href=url;link.textContent=url;
+ box.classList.remove("hidden");
+}
+function permMsg(text,isError){
+ const m=$("permSubMsg");if(!m)return;
+ m.textContent=text;m.style.color=isError?"#ff9c9c":"";m.classList.remove("hidden");
+}
+function updateSubNativeWarn(){
+ const w=$("subNativeWarn");if(w)w.classList.toggle("hidden",currentFormat!=="native");
+}
+function nativeSubConfirm(){
+ return confirm("当前是「原生 Usque config.json」格式：生成的订阅链接是 JSON 文件，Clash Verge / FlClash 等客户端无法直接导入（会报导入失败）。\n\n建议点「取消」，先切换到 Clash / Mihomo 格式再生成。仍要继续吗？");
+}
+function showSubQr(url,tier){
+ const payload=currentFormat==="clash"?`clash://install-config?url=${encodeURIComponent(url)}`:url;
+ const qr=qrcode(0,"M");qr.addData(payload);qr.make();
+ $("subQrBox").innerHTML=qr.createSvgTag({cellSize:5,margin:10,scalable:true});
+ const link=$("subQrLink");link.href=url;link.textContent=url;
+ $("subQrValidity").textContent=tier==="perm"?"订阅链接（常驻，长期有效）：":tier==="7d"?"订阅链接（7 天内有效）：":"订阅链接（24 小时内有效）：";
+ const base=currentFormat==="clash"
+   ?"用 Clash Verge / FlClash 等客户端扫码会直接弹出导入订阅；也可以在手机上打开订阅链接下载文件再导入。"
+   :currentFormat==="native"
+   ?"注意：这是原生 config.json 文件的链接，只能下载后在本工具中导入使用；Clash 等客户端无法用它导入订阅——需要客户端订阅请切换到 Clash 格式重新生成。"
+   :"用手机扫码或打开订阅链接即可下载这个配置文件，再导入对应客户端。";
+ $("subQrTip").textContent=base+(tier==="perm"?" 这是常驻链接：以后换配置在下方「我的常驻订阅」点「更新为当前配置」即可，链接和二维码都不变。":tier==="7d"?" 链接 7 天后自动失效。":" 链接 24 小时后自动失效。");
+ $("subQrPanel").classList.remove("hidden");
+ renderSubImportLinks(url);wizSet(3);
+}
+const SUB_OWNER_KEY_LS="usque.subOwnerKey";
+function loadSubOwnerKey(){try{return localStorage.getItem(SUB_OWNER_KEY_LS)||"";}catch{return "";}}
+function saveSubOwnerKey(v){try{if(v)localStorage.setItem(SUB_OWNER_KEY_LS,v);else localStorage.removeItem(SUB_OWNER_KEY_LS);}catch{}}
+async function subApi(path,body,retry=true){
+ const headers={"Content-Type":"application/json"};
+ const ownerKey=loadSubOwnerKey();
+ if(ownerKey)headers["X-Sub-Owner"]=ownerKey;
+ const res=await fetch(path,{method:"POST",headers,body:JSON.stringify(body)});
+ const data=await res.json().catch(()=>({}));
+ if(res.status===403&&data.code==="owner_required"){
+  if(retry){
+   const entered=prompt("常驻订阅仅部署者可用。请输入部署者口令（部署者在 Cloudflare 里设置的 SUB_OWNER_KEY；只保存在你这台浏览器里）：");
+   if(entered&&entered.trim()){saveSubOwnerKey(entered.trim());return subApi(path,body,false);}
+   throw new Error("已取消输入部署者口令，常驻订阅未生成。");
+  }
+  saveSubOwnerKey(null);
+  throw new Error(data.message||"部署者口令不正确。");
+ }
+ if(!res.ok)throw new Error(data.message||`操作失败（HTTP ${res.status}）`);
+ return data;
+}
+async function makeSubQr(){
+ const btn=$("makeSubQr"),err=$("subQrError"),panel=$("subQrPanel");
+ const content=$("mainOutput").value;
+ const tier=$("subTier")?.value||"24h";
+ err.classList.add("hidden");panel.classList.add("hidden");
+ if(!content){err.textContent="先注册或导入 config.json 生成配置，再生成二维码。";err.classList.remove("hidden");return;}
+ if(currentFormat==="native"&&!nativeSubConfirm())return;
+ btn.disabled=true;btn.textContent="正在生成…";
+ try{
+  const perm=loadPermSub();
+  if(tier==="perm"&&perm){
+   try{
+    await subApi("/api/sub/update",{token:perm.token,format:currentFormat,content});
+   }catch(e){
+    if(!/不存在|已过期/.test(String((e&&e.message)||e)))throw e;
+    savePermSub(null);
+    const data=await subApi("/api/sub",{format:currentFormat,content,tier:"perm"});
+    if(data.token)savePermSub({token:data.token,format:currentFormat});
+    showSubQr(data.url,"perm");
+    renderPermSubBox();
+    return;
+   }
+   savePermSub({token:perm.token,format:currentFormat});
+   showSubQr(permSubUrl(perm.token),"perm");
+  }else{
+   const data=await subApi("/api/sub",{format:currentFormat,content,tier});
+   if(!data.url)throw new Error("生成失败：后端没有返回链接。");
+   if(tier==="perm"&&data.token)savePermSub({token:data.token,format:currentFormat});
+   showSubQr(data.url,tier);
+  }
+  renderPermSubBox();
+ }catch(e){
+  err.textContent=String((e&&e.message)||e);
+  err.classList.remove("hidden");
+ }finally{
+  btn.disabled=false;btn.textContent="📱 扫码获取订阅（生成二维码）";
+ }
+}
+$("makeSubQr")?.addEventListener("click",makeSubQr);
+async function permSubUpdate(){
+ const perm=loadPermSub();if(!perm)return;
+ const content=$("mainOutput").value;
+ if(!content){permMsg("先注册或导入 config.json 生成配置，再点更新。",true);return;}
+ if(currentFormat==="native"&&!nativeSubConfirm())return;
+ try{
+  await subApi("/api/sub/update",{token:perm.token,format:currentFormat,content});
+  savePermSub({token:perm.token,format:currentFormat});
+  showSubQr(permSubUrl(perm.token),"perm");
+  permMsg("已更新：常驻链接不变，内容已换成当前配置。客户端里点一次「更新订阅」即可。",false);
+ }catch(e){
+  permMsg(String((e&&e.message)||e),true);
+  if(/不存在|已过期/.test(String((e&&e.message)||e))){savePermSub(null);renderPermSubBox();}
+ }
+}
+async function permSubRotate(){
+ const perm=loadPermSub();if(!perm)return;
+ try{
+  const data=await subApi("/api/sub/rotate",{token:perm.token});
+  if(!data.token)throw new Error("轮换失败：后端没有返回新链接。");
+  savePermSub({token:data.token,format:perm.format});
+  renderPermSubBox();
+  showSubQr(data.url||permSubUrl(data.token),"perm");
+  permMsg("已轮换：旧链接立即失效，请用新链接或新二维码重新导入一次。",false);
+ }catch(e){permMsg(String((e&&e.message)||e),true);}
+}
+async function permSubRevoke(){
+ const perm=loadPermSub();if(!perm)return;
+ try{await subApi("/api/sub/revoke",{token:perm.token});}catch(e){/* 后端记录已不存在时同样清掉本地 */}
+ savePermSub(null);renderPermSubBox();resetSubQr();
+ toast("常驻订阅已删除，链接立即失效。","success","已删除");
+}
+$("permSubUpdate")?.addEventListener("click",permSubUpdate);
+$("permSubRotate")?.addEventListener("click",permSubRotate);
+$("permSubRevoke")?.addEventListener("click",permSubRevoke);
+renderPermSubBox();
+updateSubNativeWarn();
 $("copyMain").addEventListener("click",()=>copyText($("mainOutput").value,$("copyMain")));
 $("downloadMain").addEventListener("click",()=>{
  if(currentFormat==="native")download("usque-config.json",$("mainOutput").value,"application/json");
@@ -1319,5 +1811,5 @@ $("downloadEgressConfig").addEventListener("click",()=>{
   download("warp-egress-preference.json",JSON.stringify(egressPreferences(),null,2),"application/json");
 });
 
-resetRecommended();syncConditional();updateEstimate();updateFreeEgressHint();updateCustomIpRoutingHint();setSettingsState("clean","当前设置已应用");
+resetRecommended();syncConditional();loadRemotePool();renderAccounts();checkPanelUpdate();updateEstimate();updateFreeEgressHint();updateCustomIpRoutingHint();setSettingsState("clean","当前设置已应用");
 })();
